@@ -1,11 +1,25 @@
 # dsh-memos-local
 
 > **DSH fork** of `@memtensor/memos-local-plugin` (MemTensor/MemOS).
-> Fork maintained by steven-stack-s for DeepSeek Harness (DSH).
-> Upstream: https://github.com/MemTensor/MemOS · apps/memos-local-plugin
+> Subtree-split from the MemOS monorepo (apps/memos-local-plugin) with full
+> commit history preserved.
+> Maintained by steven-stack-s for DeepSeek Harness (DSH).
 
-Reflect2Evolve memory plugin for AI agents.
-One algorithm core, with an adapter for **DeepSeek Harness (DSH)**.
+## 与上游的关系（subtree 同步）
+
+本仓库用 `git subtree split` 从 MemTensor/MemOS monorepo 的
+`apps/memos-local-plugin` 独立出来，保留了该子目录的完整提交历史。
+同步上游 core 算法更新：
+
+```bash
+# remote upstream 已配置（只读）。拉取上游一棵完整的 monorepo tree：
+git fetch upstream
+# 把上游最新的 apps/memos-local-plugin 结点合并进来（subtree 合并）：
+git subtree merge --squash -P . upstream/<branch>
+# 或更精确地，用 --prefix 提取上游该子目录的最新内容后整体整合。
+```
+
+> 说明：core 算法逻辑尽量少改，以便 subtree 合并冲突最小化。
 ## What it is
 
 A local-first, file-backed memory system that gives an agent four cooperating
