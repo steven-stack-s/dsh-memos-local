@@ -1,93 +1,95 @@
-// MemOS memory client bundle for DeepSeek Harness (DSH).
+// Memory client bundle for DeepSeek Harness (DSH) — memos-local.
 //
 // Hand-written per DSH's cordis-plugin-development convention:
 //   window.__ModuleLoader__.load({ id, factory }) registers a lazy browser
-//   module. React is provided by the browser module table. This bundle
-//   contributes:
-//     1. a "Memory" panel entry in the left navigation (sidebar.panellist),
-//        alongside Conversation / Trajectory; and
-//     2. a "Memory (Memos)" configuration section in DSH Settings
-//        (settings.section).
+//   module. The bundle contributes three DSH UI surfaces:
+//     1. a full "Memory" panel in the main content area (main, key 'memos');
+//     2. a "Memory" entry in the left nav panel list (sidebar.panellist);
+//     3. a "Memory (Memos)" section in DSH Settings (settings.section).
 //
+// Panel content embeds the memos-local viewer (served on 127.0.0.1:18801)
+// in an iframe.
 window.__ModuleLoader__.load({
   id: 'dsh-memos-local',
   factory(require) {
     const React = require('react');
     const h = React.createElement;
 
-    const MEMOS_NODE = 'memos';
+    const NODE = 'memos';
+    const VIEWER_ALONE = '/memos'; // same-origin viewer mount via DSH web server
 
-    // --- Small icon for the left navigation panel entry (sidebar.panellist) ---
+    // --- Left nav icon (sidebar.panellist) ---
     function MemoryNavIcon() {
       return h('svg', {
-        viewBox: '0 0 24 24',
-        width: 20,
-        height: 20,
-        fill: 'none',
-        stroke: 'currentColor',
-        strokeWidth: 2,
-        strokeLinecap: 'round',
-        strokeLinejoin: 'round',
-        'aria-hidden': true,
+        viewBox: '0 0 24 24', width: 18, height: 18, fill: 'none',
+        stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round',
+        strokeLinejoin: 'round', 'aria-hidden': true,
       },
-        // a simple "memory chip" glyph
-        h('rect', { x: 4, y: 4, width: 10, height: 10, rx: 2 }),
-        h('path', { d: 'M4 14h4v6' }),
-        h('path', { d: 'M14 9h6v10' }),
-        h('path', { d: 'M9 20v-2M20 19v-2' }),
+        h('rect', { x: 5, y: 4, width: 12, height: 16, rx: 2 }),
+        h('path', { d: 'M9 4v16M15 4v16M5 9h4M5 15h4' }),
       );
     }
 
-    // --- Configuration / status section in DSH Settings (settings.section) ---
-    // Reads the host-side viewer endpoint health. Kept minimal on purpose:
-    // this is the "wire link" proof for the client bundle.
-    function MemosSettingsSection(props) {
+    // --- Main panel content (main, key 'memos') ---
+    // Embeds the dedicated memory viewer. DSH runs on the same host, so a
+    // localhost loopback URL is used; keep it minimal and dependency-free.
+    function MemoryPanel() {
+      return h('iframe', {
+        src: '/memos/',
+        title: 'Memory',
+        style: { width: '100%', height: '100%', border: '0', background: '#fff', display: 'block' },
+        sandbox: 'allow-same-origin allow-scripts allow-forms allow-popups',
+      });
+    }
+
+    // --- Settings section (settings.section) ---
+    function MemorySettingsSection() {
       const [state, setState] = React.useState('checking');
       React.useEffect(() => {
         let alive = true;
-        const port = props.port ?? 18801;
-        fetch('http://127.0.0.1:' + port + '/api/health', { signal: AbortSignal.timeout(2000) })
+        fetch('/memos/api/v1/auth/status', { signal: AbortSignal.timeout(2500) })
           .then((res) => { if (alive) setState(res.ok ? 'online' : 'offline'); })
           .catch(() => { if (alive) setState('offline'); });
         return () => { alive = false; };
-      }, [props.port]);
+      }, []);
       const statusText =
-        state === 'online' ? 'Viewer service online on port 18801' :
-        state === 'offline' ? 'Viewer service offline / unreachable' : 'Checking viewer status…';
-      return h('div', { style: { padding: '8px 0' } },
-        h('div', { style: { fontSize: 13, opacity: 0.8, marginBottom: 8 } },
-          'Memory plugin (dsh-memos-local). Memory is captured and retrieved by the host agent automatically.'),
-        h('div', { style: { fontSize: 13 } }, statusText),
-        h('a', {
-          href: 'http://127.0.0.1:' + (props.port ?? 18801),
-          target: '_blank',
-          rel: 'noreferrer',
-          style: { color: 'inherit', textDecoration: 'underline', marginTop: 8, display: 'inline-block' },
-        }, 'Open Memory Viewer'),
+        state === 'online' ? 'Viewer online on port 18801' :
+        state === 'offline' ? 'Viewer offline / unreachable' : 'Checking viewer status…';
+      return h('div', { style: { padding: '8px 0', fontSize: 13, lineHeight: 1.6 } },
+        h('div', { style: { opacity: 0.75, marginBottom: 8 } },
+          'Memory plugin (dsh-memos-local). Memory is captured and retrieved by the host agent automatically; the viewer shows all stored items.'),
+        h('div', {}, statusText),
+        h('a', { href: '/memos/', target: '_blank', rel: 'noreferrer',
+          style: { color: 'inherit', textDecoration: 'underline', display: 'inline-block', marginTop: 8 } },
+          'Open Memory Viewer'),
       );
     }
 
+    // --- Registration ---
     return {
       inject: ['slots'],
       apply(ctx) {
-        // 1) Left navigation "Memory" entry (alongside Conversation/Trajectory).
+        // 1) Main panel content (required so selectPanel('memos') can render).
+        ctx.slots.inject('main', () => ctx.slots.register({
+          name: 'main',
+          key: NODE,
+        }, MemoryPanel));
+
+        // 2) Left navigation entry alongside Conversation / Trajectory.
         ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
           name: 'sidebar.panellist',
-          id: MEMOS_NODE,
+          id: NODE,
           order: 60,
           label: () => 'Memory',
-          locale: '@local/memos',
         }, MemoryNavIcon));
 
-        // 2) DSH Settings configuration section.
+        // 3) Settings section.
         ctx.slots.inject('settings.section', () => ctx.slots.register({
           name: 'settings.section',
-          id: MEMOS_NODE,
+          id: NODE,
           order: 60,
           label: () => 'Memory (Memos)',
-          locale: '@local/memos',
-          inject: () => ({ port: 18801 }),
-        }, MemosSettingsSection));
+        }, MemorySettingsSection));
       },
     };
   },

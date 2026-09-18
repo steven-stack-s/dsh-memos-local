@@ -21,7 +21,8 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-ui-slots"
-      ]
+      ],
+      "immediately": true
     }
   },
   "files": [
@@ -148,7 +149,7 @@
   "exports": {
     ".": {
       "types": "./dist/core/index.d.ts",
-      "default": "./dist/core/index.js"
+      "default": "./dist/adapters/deepseek-harness/index.js"
     },
     "./client": "./client/client.js",
     "./package.json": "./package.json",

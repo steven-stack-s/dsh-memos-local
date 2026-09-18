@@ -39,9 +39,10 @@ import {
   type DeepSeekHarnessHostLlmBridge,
 } from "./host-llm.js";
 import { registerDeepSeekHarnessTools } from "./tools.js";
+import { mountViewerProxy } from "./viewer-proxy.js";
 
 export const name = DEEPSEEK_HARNESS_PLUGIN;
-export const inject = ["systemPrompt", "tools", "llm"];
+export const inject = ["systemPrompt", "tools", "llm", "webServer"];
 export const DEEPSEEK_HARNESS_VIEWER_PORT = 18_801;
 export const DEEPSEEK_HARNESS_VIEWER_RETRY_DELAYS_MS = [
   250,
@@ -305,6 +306,16 @@ export async function apply(
         }
         viewer = await startViewer();
         ctx.logger.info(`memos-local-memory: viewer live at ${viewer.url}`);
+        // Mount the viewer on the DSH web server at `/memos` so the same
+        // external HTTPS entrance reaches the loopback-only viewer. Uses the
+        // resolved viewer port so a custom `viewerPort` is honoured.
+        registrations.push(
+          mountViewerProxy(
+            (ctx as unknown as { webServer: Parameters<typeof mountViewerProxy>[0] }).webServer,
+            config.viewerPort,
+            (msg) => ctx.logger.info(msg),
+          ),
+        );
       } catch (error) {
         const err = error as NodeJS.ErrnoException;
         const detail = isAddressInUse(error)

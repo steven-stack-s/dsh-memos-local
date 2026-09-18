@@ -1,6 +1,6 @@
 - insert:
     - id: memos-local-memory
-      name: 'dsh-memos-local/dist/adapters/deepseek-harness/index.js'
+      name: 'dsh-memos-local'
       config:
         enabled: true
         profileId: default
