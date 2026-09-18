@@ -1,0 +1,88 @@
+# ============================================================================
+# create-release.yml — 为【已存在的】tag 创建或更新 GitHub Release
+#
+# 通过 workflow_dispatch 触发，使用内置的 GITHUB_TOKEN，**不需要额外的 PAT**。
+# 用法（Actions → create-release → Run workflow）：
+#   - tag 留空  → 自动补齐所有**尚无 Release** 的 tag
+#   - tag 填值  → 只处理该 tag（如 v2.0.16-beta.1），幂等：已存在则更新正文
+#
+# release notes 取自 CHANGELOG 中对应 tag 的段落（## [<tag>]）；抽不到时退回一句指向 CHANGELOG 的说明。
+# ============================================================================
+name: create-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要处理的 tag（留空则补齐所有尚无 Release 的 tag）'
+        required: false
+        default: ''
+  # 本文件自身被修改并推送时也跑一次（幂等）。
+  push:
+    paths:
+      - '.github/workflows/create-release.yml'
+
+concurrency:
+  group: create-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout（含全部 tag）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Create or update release(s)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_TAG: ${{ inputs.tag }}
+        run: |
+          set -u
+          fail=0
+          if [ -n "${TARGET_TAG:-}" ]; then
+            candidates="$TARGET_TAG"
+          else
+            candidates="$(git tag -l --sort=v:refname)"
+          fi
+          if [ -z "$(printf "%s" "$candidates" | tr -d '[:space:]')" ]; then
+            echo "::error::候选 tag 为空 —— 多半是 checkout 没拉到 tag（见 fetch-tags）。拒绝静默成功。"
+            exit 1
+          fi
+          created=0; updated=0
+          for t in $candidates; do
+            [ -n "$t" ] || continue
+            if ! git rev-parse -q --verify "refs/tags/$t" >/dev/null; then
+              echo "::warning::tag $t 不存在，跳过"
+              continue
+            fi
+            awk -v tag="$t" '
+              index($0, "## [" tag "]") == 1 { f = 1; next }
+              f && index($0, "## [") == 1 { exit }
+              f { print }
+            ' CHANGELOG.md > /tmp/notes.md
+            if [ ! -s /tmp/notes.md ]; then
+              printf 'See CHANGELOG.md for details.\n' > /tmp/notes.md
+            fi
+            if gh release view "$t" >/dev/null 2>&1; then
+              if gh release edit "$t" --title "$t" --notes-file /tmp/notes.md --draft=false; then
+                echo "updated: $t"; updated=$((updated + 1))
+              else
+                echo "::error::更新 release 失败: $t"; fail=1
+              fi
+            else
+              if gh release create "$t" --title "$t" --notes-file /tmp/notes.md --verify-tag; then
+                echo "created: $t"; created=$((created + 1))
+              else
+                echo "::error::创建 release 失败: $t"; fail=1
+              fi
+            fi
+          done
+          echo "==== 完成：新建 $created 个，更新 $updated 个 ===="
+          echo "查看：https://github.com/steven-stack-s/dsh-memos-local/releases"
+          [ "$fail" -eq 0 ] || { echo "::error::有 release 未能创建/更新，见上方 error"; exit 1; }
