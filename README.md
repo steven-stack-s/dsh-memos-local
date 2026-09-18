@@ -1,5 +1,7 @@
 # dsh-memos-local
 
+**English** | [简体中文](./README.zh-CN.md)
+
 > **DSH fork** of `@memtensor/memos-local-plugin` (MemTensor/MemOS).
 > Subtree-split from the MemOS monorepo (apps/memos-local-plugin) with full
 > commit history preserved.
