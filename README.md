@@ -1,9 +1,11 @@
-# @memtensor/memos-local-plugin
+# dsh-memos-local
 
-> Reflect2Evolve memory plugin for AI agents.
-> One algorithm core, with adapters for OpenClaw, Hermes Agent, and DeepSeek
-> Harness.
+> **DSH fork** of `@memtensor/memos-local-plugin` (MemTensor/MemOS).
+> Fork maintained by steven-stack-s for DeepSeek Harness (DSH).
+> Upstream: https://github.com/MemTensor/MemOS · apps/memos-local-plugin
 
+Reflect2Evolve memory plugin for AI agents.
+One algorithm core, with an adapter for **DeepSeek Harness (DSH)**.
 ## What it is
 
 A local-first, file-backed memory system that gives an agent four cooperating
