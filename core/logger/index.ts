@@ -92,7 +92,9 @@ function bootstrapConsoleOnly(): LoggerCore {
     pid: process.pid,
     host: hostname(),
     seq: 0,
-    tz: "UTC",
+    // DSH-fork: default to Asia/Shanghai (production timezone).
+    // Override with MEMOS_TZ or TZ env.
+    tz: process.env.MEMOS_TZ || process.env.TZ || "Asia/Shanghai",
     filesActive: false,
   };
 }

@@ -71,6 +71,26 @@ async function ensureExtractor(model: string, log: ProviderCallCtx["log"]): Prom
     // Dynamic import keeps the heavy dep out of the hot path for tests that
     // don't need it.
     const mod = await import("@huggingface/transformers");
+    // DSH-fork: route model downloads through a reachable mirror + persist cache.
+    // Controlled by env so non-DSH users stay unaffected:
+    //   MEMOS_HF_MIRROR       mirror base URL (default hf-mirror.com)
+    //   MEMOS_HF_MIRROR_DISABLE=1  disable the mirror override
+    //   MEMOS_MODEL_CACHE     cache dir (default DSH_HOME/memos-plugin/data/.model-cache)
+    const envNs = mod as { env?: Record<string, unknown> };
+    if (envNs.env && !process.env.MEMOS_HF_MIRROR_DISABLE) {
+      envNs.env.remoteHost = process.env.MEMOS_HF_MIRROR || "https://hf-mirror.com/";
+    }
+    if (envNs.env) {
+      const cacheDir =
+        process.env.MEMOS_MODEL_CACHE ||
+        (process.env.DSH_HOME
+          ? [process.env.DSH_HOME, "memos-plugin", "data", ".model-cache"].join("/")
+          : undefined);
+      if (cacheDir) {
+        envNs.env.cacheDir = cacheDir;
+        envNs.env.useFSCache = true;
+      }
+    }
     const pipeline = (mod as unknown as { pipeline: PipelineFn }).pipeline;
     const ext = (await pipeline("feature-extraction", model, {
       dtype: "q8",
