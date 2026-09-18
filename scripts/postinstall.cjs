@@ -1,46 +1,28 @@
 #!/usr/bin/env node
 /*
- * postinstall hook for @memtensor/memos-local-plugin.
- *
- * This file is intentionally tiny and side-effect free. It MUST NOT touch the
- * user's home directory, write any state, or assume which agent the user is
- * installing for. All of that happens in install.sh / install.ps1, which the
- * user runs explicitly with their chosen agent.
- *
- * We only print a friendly hint so users know what to do next.
+ * DSH fork of @memtensor/memos-local-plugin.
+ * postinstall hook — intentionally tiny and side-effect free.
+ * DeepSeek Harness manages the plugin via `dsh plugin` / plugin_manager,
+ * so no agent-specific installer is invoked here.
  */
 
 "use strict";
 
-const path = require("node:path");
-
-// Skip when the package is being linked locally during development.
+// Skip local dev installs and non-forced scenarios (same as upstream).
 if (process.env.npm_config_global !== "true" && process.env.MEMOS_FORCE_POSTINSTALL !== "1") {
-  // Local dev installs (npm install in a workspace) don't need the hint.
-  // Allow override with MEMOS_FORCE_POSTINSTALL=1 for testing.
   process.exit(0);
 }
 
-const here = path.dirname(__dirname);
-const installSh = path.join(here, "install.sh");
-const installPs1 = path.join(here, "install.ps1");
-
 const banner = [
   "",
-  "  @memtensor/memos-local-plugin installed.",
+  "  dsh-memos-local installed.",
   "",
-  "  Source code is here, but no agent has been wired up yet. Run the",
-  "  installer for your agent to (1) deploy the plugin into the agent's",
-  "  plugin directory and (2) generate config.yaml under your agent's",
-  "  runtime data directory.",
+  "  Source code is here, but no DeepSeek Harness profile has been wired up.",
+  "  Install / enable it in your DSH profile with:",
   "",
-  "    macOS / Linux:",
-  "      bash " + installSh + " openclaw     # or: hermes",
+  "      dsh plugin --profile web add dsh-memos-local",
   "",
-  "    Windows (PowerShell):",
-  "      powershell -ExecutionPolicy Bypass -File " + installPs1,
-  "",
-  "  Re-running the installer is safe; it only generates config.yaml on first run.",
+  "  Then enable the bundle row 'memos-local-memory' (or via plugin_manager).",
   "",
 ].join("\n");
 

@@ -4,12 +4,8 @@
     "core/**/*.ts",
     "agent-contract/**/*.ts",
     "server/**/*.ts",
-    "bridge/**/*.ts",
-    "adapters/openclaw/**/*.ts",
     "adapters/deepseek-harness/**/*.ts",
-    "scripts/**/*.ts",
-    "bridge.cts",
-    "bridge.mts"
+    "scripts/**/*.ts"
   ],
   "exclude": [
     "node_modules",
