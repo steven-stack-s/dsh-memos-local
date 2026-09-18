@@ -78,7 +78,7 @@
     "@huggingface/transformers": "4.2.0",
     "@preact/signals": "^2.9.0",
     "@sinclair/typebox": "^0.34.48",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "12.11.1",
     "preact": "^10.29.1",
     "tsx": "^4.21.0",
     "uuid": "^10.0.0",
