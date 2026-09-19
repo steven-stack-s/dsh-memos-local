@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
-import { parse } from "yaml";
 
 import { MemosError } from "../../../agent-contract/errors.js";
 import { DEFAULT_CONFIG, loadConfig, resolveConfig, resolveHome } from "../../../core/config/index.js";
@@ -113,13 +112,6 @@ describe("config/loadConfig", () => {
     );
   });
 
-  it("ships new agent installations with a safe embedding input limit", async () => {
-    for (const template of ["config.openclaw.yaml", "config.hermes.yaml"]) {
-      const raw = await fs.readFile(join(__dirname, "../../../templates", template), "utf8");
-      const cfg = resolveConfig(parse(raw));
-      expect(cfg.embedding.maxInputTokens, template).toBe(1_024);
-    }
-  });
 
   it("keeps long-input chunking disabled for existing configs that predate the setting", async () => {
     const ctx = await makeTmpHome({

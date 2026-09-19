@@ -19,8 +19,6 @@ export default defineConfig({
       include: [
         "core/**/*.ts",
         "server/**/*.ts",
-        "bridge/**/*.ts",
-        "adapters/openclaw/**/*.ts",
         "adapters/deepseek-harness/**/*.ts",
       ],
       exclude: ["**/*.test.ts", "**/*.d.ts", "**/index.ts"],

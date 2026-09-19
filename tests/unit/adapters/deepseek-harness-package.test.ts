@@ -31,7 +31,7 @@ describe("DeepSeek Harness bundle package", () => {
         insert: [
           expect.objectContaining({
             id: "memos-local-memory",
-            name: "@memtensor/memos-local-plugin/dist/adapters/deepseek-harness/index.js",
+            name: "dsh-memos-local",
             config: expect.objectContaining({
               enabled: true,
               recallEnabled: true,
