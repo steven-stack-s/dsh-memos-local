@@ -9,9 +9,11 @@
 #   - push tag  v*        → 用该 tag 发布对应版本
 #   - workflow_dispatch   → 手动发布当前 main 的版本
 #
-# 认证: 需要仓库 Secret `NPM_TOKEN` —— 在 npmjs.com 生成的 Automation token
-#       (Access Tokens → Generate New Token → Classic → Automation)。
-#       Automation 类型会绕过 2FA, 适合 CI。
+# 认证: 需要仓库 Secret —— 名字用 `NPM_TOKEN` 或 `NPM` 均可(workflow 两者兼容)。
+#       去 npmjs.com 生成 **Granular Access Token** 并勾选 **Bypass 2FA**
+#       (Access Tokens → Generate New Token → Granular Access Token)。
+#       注意: 账号开了 2FA 时, Classic 的 Publish 类型 token 发布会 403;
+#       必须用带 bypass 2FA 的 granular token(或改用 Trusted Publishing/OIDC)。
 #
 # 版本策略: 与上游 @memtensor/memos-local-plugin 严格一致(见 README)。
 # 发布前校验 tag 与 package.json 的 version 是否一致, 不一致直接失败。
@@ -62,7 +64,7 @@ jobs:
             exit 1
           fi
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN || secrets.NPM }}
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
@@ -73,7 +75,7 @@ jobs:
       - name: Publish to npmjs
         run: npm publish --registry https://registry.npmjs.org --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN || secrets.NPM }}
 
       - name: Summary
         run: |
