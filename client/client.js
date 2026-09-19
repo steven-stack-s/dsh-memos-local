@@ -27,7 +27,7 @@ window.__ModuleLoader__.load({
       settings: '记忆 (MemOS)',
       panelTitle: '记忆',
       versionLabel: '版本',
-      title: 'MemOS',
+      title: '记忆（MemOS）',
       healthOk: '模型就绪',
       healthDegraded: '有模型不可用',
       healthUnknown: '状态未知',
@@ -48,7 +48,7 @@ window.__ModuleLoader__.load({
       settings: 'Memory (MemOS)',
       panelTitle: 'Memory',
       versionLabel: 'Version',
-      title: 'MemOS',
+      title: 'Memory (MemOS)',
       healthOk: 'Models ready',
       healthDegraded: 'A model is unavailable',
       healthUnknown: 'Status unknown',
@@ -173,8 +173,8 @@ window.__ModuleLoader__.load({
         },
         disabled: authBusy || authEnabled === null,
         style: {
-          margin: 0, padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
-          fontSize: 12, fontWeight: 600, border: '1px solid transparent',
+          margin: 0, padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
+          fontSize: '0.9em', fontWeight: 600, border: '1px solid transparent', lineHeight: 1.6,
           background: authEnabled
             ? 'var(--dsw-alias-state-error-primary, #e5484d)'
             : 'var(--dsw-alias-state-success-primary, #2f8f4e)',
@@ -184,11 +184,11 @@ window.__ModuleLoader__.load({
       const authInfo = h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
         h('span', { style: { fontWeight: 600 } },
           t.authLabel + ': ' + (authEnabled === null ? '\u2026' : (authEnabled ? t.authOn : t.authOff))),
-        authErr ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary, #e5484d)', fontSize: 12 } }, t.authErr) : null,
+        authErr ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary, #e5484d)', fontSize: '0.85em', opacity: 0.9 } }, t.authErr) : null,
       );
       const rowStyle = {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        gap: 12, padding: '6px 0',
+        gap: 12, padding: 0,
       };
       const tabs = [
         { id: 'settings', label: t.tabSettings },
@@ -202,7 +202,7 @@ window.__ModuleLoader__.load({
         style: {
           display: 'flex', alignItems: 'flex-end', gap: 22,
           borderBottom: '0.5px solid var(--dsw-alias-border-l2, rgba(128,128,128,.28))',
-          margin: '4px 0 10px',
+          margin: '6px 0 8px',
         },
       }, tabs.map((item) => {
         const active = tab === item.id;
@@ -214,7 +214,7 @@ window.__ModuleLoader__.load({
           style: {
             position: 'relative', margin: 0, padding: '7px 1px 9px',
             background: 'none', border: 0, cursor: 'pointer', font: 'inherit',
-            fontSize: 13, lineHeight: '20px',
+            fontSize: '1em', lineHeight: '20px',
             color: active
               ? 'var(--dsw-alias-label-primary, inherit)'
               : 'var(--dsw-alias-label-tertiary, rgba(128,128,128,.9))',
@@ -255,41 +255,35 @@ window.__ModuleLoader__.load({
       const healthLabel =
         modelOk === null ? t.healthUnknown :
         modelOk ? t.healthOk : t.healthDegraded;
-      const header = h('div', { style: { padding: '4px 0 10px' } },
-        // Title row.
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 } },
-          h('span', { style: { fontSize: 15, fontWeight: 700, letterSpacing: '-.01em' } }, t.title),
-        ),
-        // Status row: health dot + version pill + viewer status.
+      const header = h('div', { style: { padding: '0 0 6px' } },
+        // Title row: name on the left, health dot + version trailing it as
+        // small print. Everything inherits the host font size so the card
+        // tracks the DSH appearance settings.
         h('div', {
           style: {
-            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-            fontSize: 13, lineHeight: 1.6,
+            display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+            marginBottom: 4,
           },
         },
+          h('span', { style: { fontSize: '1.06em', fontWeight: 600 } }, t.title),
           h('span', {
-            key: 'health',
-            title: healthLabel,
-            'aria-label': healthLabel,
             style: {
-              width: 8, height: 8, borderRadius: 999, flexShrink: 0,
-              background: healthColor,
-              boxShadow: '0 0 0 3px color-mix(in srgb, ' + healthColor + ' 22%, transparent)',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              fontSize: '0.85em', opacity: 0.7,
             },
-          }),
-          // Rendered unconditionally (empty until health resolves) so the
-          // three status children keep a stable position across renders
-          // instead of relying on diff-time insertion.
-          h('span', {
-            key: 'version',
-            title: versionText ? t.versionLabel : undefined,
-            style: versionText ? {
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-              fontSize: 12, padding: '1px 8px', borderRadius: 999,
-              border: '1px solid rgba(128,128,128,.35)', opacity: 0.85,
-            } : { display: 'none' },
-          }, versionText),
-
+          },
+            h('span', {
+              key: 'health',
+              title: healthLabel,
+              'aria-label': healthLabel,
+              style: {
+                width: 7, height: 7, borderRadius: 999, flexShrink: 0,
+                background: healthColor,
+                boxShadow: '0 0 0 2px color-mix(in srgb, ' + healthColor + ' 22%, transparent)',
+              },
+            }),
+            h('span', { key: 'version' }, versionText),
+          ),
         ),
         // Auth row.
         h('div', { style: rowStyle }, authInfo, toggle),
@@ -298,13 +292,13 @@ window.__ModuleLoader__.load({
         tab === 'import' ? frame('/import', t.tabImport) :
         tab === 'help' ? frame('/help', t.tabHelp) :
         frame('/settings', t.tabSettings);
-      return h('div', { style: { padding: '8px 0', fontSize: 13, lineHeight: 1.6 } },
+      return h('div', { style: { padding: 0, fontSize: 'inherit', lineHeight: 'inherit' } },
         header,
         tabBar,
         body,
         h('a', {
           href: '/memos/', target: '_blank', rel: 'noreferrer',
-          style: { color: 'inherit', textDecoration: 'underline', display: 'inline-block', marginTop: 8 },
+          style: { color: 'inherit', textDecoration: 'underline', display: 'inline-block', marginTop: 6, fontSize: '0.9em' },
         }, t.open),
       );
     }
