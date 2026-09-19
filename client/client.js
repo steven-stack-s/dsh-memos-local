@@ -26,19 +26,15 @@ window.__ModuleLoader__.load({
       nav: '记忆',
       settings: '记忆 (MemOS)',
       panelTitle: '记忆',
-      statusOnline: '查看器在线（端口 18801）',
-      statusOffline: '查看器离线 / 不可达',
-      statusChecking: '正在检查查看器状态…',
       versionLabel: '版本',
       title: 'MemOS',
       healthOk: '模型就绪',
       healthDegraded: '有模型不可用',
-      healthUnknown: '模型状态未知',
+      healthUnknown: '状态未知',
       open: '打开记忆查看器',
       authOn: '密码保护已开启',
       authOff: '密码保护已关闭',
       authLabel: '认证',
-      authHint: '开启后访问记忆查看器需输入密码；关闭后直连 dsh-remote 认证，无需二次登录。',
       authSwitchOn: '关闭',
       authSwitchOff: '开启',
       authBusy: '处理中…',
@@ -51,19 +47,15 @@ window.__ModuleLoader__.load({
       nav: 'Memory',
       settings: 'Memory (MemOS)',
       panelTitle: 'Memory',
-      statusOnline: 'Viewer online on port 18801',
-      statusOffline: 'Viewer offline / unreachable',
-      statusChecking: 'Checking viewer status…',
       versionLabel: 'Version',
       title: 'MemOS',
       healthOk: 'Models ready',
       healthDegraded: 'A model is unavailable',
-      healthUnknown: 'Model status unknown',
+      healthUnknown: 'Status unknown',
       open: 'Open Memory Viewer',
       authOn: 'Password protection enabled',
       authOff: 'Password protection disabled',
       authLabel: 'Authentication',
-      authHint: 'When enabled, viewing memory requires a password. Turn it off to rely on dsh-remote auth with no extra login.',
       authSwitchOn: 'Disable',
       authSwitchOff: 'Enable',
       authBusy: 'Processing…',
@@ -160,9 +152,6 @@ window.__ModuleLoader__.load({
       React.useEffect(() => { refresh(); }, []);
       const t = lang === 'zh' ? zh : en;
       const langQuery = lang === 'zh' ? '?lang=zh' : '?lang=en';
-      const statusText =
-        state === 'online' ? t.statusOnline :
-        state === 'offline' ? t.statusOffline : t.statusChecking;
       // Version pill sits BEFORE the status text, per the DSH settings layout.
       const versionText = version ? ('v' + version) : '';
       const toggle = h('button', {
@@ -186,15 +175,16 @@ window.__ModuleLoader__.load({
         style: {
           margin: 0, padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
           fontSize: 12, fontWeight: 600, border: '1px solid transparent',
-          background: authEnabled ? '#ff4d4f' : '#2f8f4e',
+          background: authEnabled
+            ? 'var(--dsw-alias-state-error-primary, #e5484d)'
+            : 'var(--dsw-alias-state-success-primary, #2f8f4e)',
           color: '#fff', opacity: authBusy || authEnabled === null ? 0.6 : 1,
         },
       }, authBusy ? t.authBusy : (authEnabled ? t.authSwitchOn : t.authSwitchOff));
       const authInfo = h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
         h('span', { style: { fontWeight: 600 } },
           t.authLabel + ': ' + (authEnabled === null ? '\u2026' : (authEnabled ? t.authOn : t.authOff))),
-        h('span', { style: { opacity: 0.65, fontSize: 12 } }, t.authHint),
-        authErr ? h('span', { style: { color: '#ff4d4f', fontSize: 12 } }, t.authErr) : null,
+        authErr ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary, #e5484d)', fontSize: 12 } }, t.authErr) : null,
       );
       const rowStyle = {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -205,20 +195,42 @@ window.__ModuleLoader__.load({
         { id: 'import', label: t.tabImport },
         { id: 'help', label: t.tabHelp },
       ];
+      // Tab strip mirrored from DSH's own settings tabs (underline indicator
+      // + label tokens) so the embedded card matches the host shell instead
+      // of carrying its own purple accent.
       const tabBar = h('div', {
-        style: { display: 'flex', gap: 6, flexWrap: 'wrap', margin: '4px 0 10px' },
-      }, tabs.map((item) => h('button', {
-        key: item.id,
-        type: 'button',
-        onClick: () => setTab(item.id),
         style: {
-          margin: 0, padding: '4px 12px', borderRadius: 999, cursor: 'pointer',
-          fontSize: 12, fontWeight: 600,
-          border: '1px solid ' + (tab === item.id ? 'transparent' : 'rgba(128,128,128,.35)'),
-          background: tab === item.id ? '#6c279d' : 'transparent',
-          color: tab === item.id ? '#fff' : 'inherit',
+          display: 'flex', alignItems: 'flex-end', gap: 22,
+          borderBottom: '0.5px solid var(--dsw-alias-border-l2, rgba(128,128,128,.28))',
+          margin: '4px 0 10px',
         },
-      }, item.label)));
+      }, tabs.map((item) => {
+        const active = tab === item.id;
+        return h('button', {
+          key: item.id,
+          type: 'button',
+          'data-active': active ? 'true' : 'false',
+          onClick: () => setTab(item.id),
+          style: {
+            position: 'relative', margin: 0, padding: '7px 1px 9px',
+            background: 'none', border: 0, cursor: 'pointer', font: 'inherit',
+            fontSize: 13, lineHeight: '20px',
+            color: active
+              ? 'var(--dsw-alias-label-primary, inherit)'
+              : 'var(--dsw-alias-label-tertiary, rgba(128,128,128,.9))',
+          },
+        },
+          item.label,
+          active ? h('span', {
+            key: 'underline',
+            style: {
+              position: 'absolute', left: 0, right: 0, bottom: -1, height: 2,
+              borderRadius: '2px 2px 0 0',
+              background: 'var(--dsw-alias-label-primary, currentColor)',
+            },
+          }) : null,
+        );
+      }));
       // Same-origin iframe (through the DSH /memos proxy) so the embedded
       // pages keep their own locale + auth handling and full functionality.
       const frame = (hash, title) => h('iframe', {
@@ -233,9 +245,13 @@ window.__ModuleLoader__.load({
       });
       // Health dot: green only when both the LLM and the embedder report
       // available. Mirrors the viewer sidebar indicator.
+      // Health dot: green when every model is available, orange when one is
+      // down, grey until the first probe resolves.
       const healthColor =
         modelOk === null ? 'rgba(128,128,128,.65)' :
-        modelOk ? '#2f8f4e' : '#e0a030';
+        modelOk
+          ? 'var(--dsw-alias-state-success-primary, #2f8f4e)'
+          : 'var(--dsw-alias-state-warn-primary, #e0a030)';
       const healthLabel =
         modelOk === null ? t.healthUnknown :
         modelOk ? t.healthOk : t.healthDegraded;
@@ -273,7 +289,7 @@ window.__ModuleLoader__.load({
               border: '1px solid rgba(128,128,128,.35)', opacity: 0.85,
             } : { display: 'none' },
           }, versionText),
-          h('span', { key: 'status', style: { opacity: 0.9 } }, statusText),
+
         ),
         // Auth row.
         h('div', { style: rowStyle }, authInfo, toggle),
