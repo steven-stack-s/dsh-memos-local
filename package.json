@@ -5,14 +5,6 @@
   "type": "module",
   "main": "dist/core/index.js",
   "types": "dist/core/index.d.ts",
-  "openclaw": {
-    "id": "memos-local-plugin",
-    "kind": "memory",
-    "extensions": [
-      "./dist/adapters/openclaw/index.js"
-    ],
-    "installDependencies": true
-  },
   "dsh": {
     "bundle": {
       "patch": "./adapters/deepseek-harness/cordis.patch.yml"
@@ -53,13 +45,8 @@
     "build:viewer": "vite build --config vite.config.ts",
     "build:package": "npm run build && npm run build:viewer",
     "prepack": "npm run build:package",
-    "sync:hermes-version": "node scripts/sync-hermes-version.cjs",
-    "check:hermes-version": "node scripts/sync-hermes-version.cjs --check",
-    "release:validate": "npm run check:hermes-version && npm run lint && npm test",
     "dev": "tsc -p tsconfig.json --watch",
     "viewer:dev": "vite --config vite.config.ts",
-    "bridge": "tsx bridge.cts",
-    "bridge:daemon": "tsx bridge.cts --daemon",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:unit": "vitest run tests/unit",
@@ -74,8 +61,6 @@
     "reflect2evolve",
     "self-evolution",
     "skill-crystallization",
-    "openclaw",
-    "hermes",
     "deepseek-harness",
     "dsh-plugin"
   ],
