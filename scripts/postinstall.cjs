@@ -15,12 +15,12 @@ if (process.env.npm_config_global !== "true" && process.env.MEMOS_FORCE_POSTINST
 
 const banner = [
   "",
-  "  dsh-memos-local installed.",
+  "  @steven-stack-s/dsh-memos-local installed.",
   "",
   "  Source code is here, but no DeepSeek Harness profile has been wired up.",
   "  Install / enable it in your DSH profile with:",
   "",
-  "      dsh plugin --profile web add dsh-memos-local",
+  "      dsh plugin --profile web add @steven-stack-s/dsh-memos-local",
   "",
   "  Then enable the bundle row 'memos-local-memory' (or via plugin_manager).",
   "",

@@ -12,7 +12,9 @@
 // carries a ?lang= query param on load, and a postMessage handshake pushes
 // subsequent DSH locale switches into the embedded viewer without a reload.
 window.__ModuleLoader__.load({
-  id: 'dsh-memos-local',
+  // Must equal the package name: the shell's client module loader keys graph
+  // entries by package name (see @xgone/dsh-remote for a scoped example).
+  id: '@steven-stack-s/dsh-memos-local',
   factory(require) {
     const React = require('react');
     const h = React.createElement;
