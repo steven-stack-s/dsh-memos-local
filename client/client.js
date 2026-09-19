@@ -183,7 +183,7 @@ window.__ModuleLoader__.load({
       }, authBusy ? t.authBusy : (authEnabled ? t.authSwitchOn : t.authSwitchOff));
       // Same size/weight as the tab labels so the card reads as one block.
       const authInfo = h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
-        h('span', { style: { fontSize: '1em', fontWeight: 500, lineHeight: 1.5 } },
+        h('span', { style: { fontSize: '1em', fontWeight: 500 } },
           t.authLabel + ': ' + (authEnabled === null ? '\u2026' : (authEnabled ? t.authOn : t.authOff))),
         authErr ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary, #e5484d)', fontSize: '0.85em', opacity: 0.9 } }, t.authErr) : null,
       );
@@ -201,7 +201,7 @@ window.__ModuleLoader__.load({
       // of carrying its own purple accent.
       const tabBar = h('div', {
         style: {
-          display: 'flex', alignItems: 'flex-end', gap: 22,
+          display: 'flex', alignItems: 'stretch', gap: 22,
           borderBottom: '0.5px solid var(--dsw-alias-border-l2, rgba(128,128,128,.28))',
 
         },
@@ -213,9 +213,9 @@ window.__ModuleLoader__.load({
           'data-active': active ? 'true' : 'false',
           onClick: () => setTab(item.id),
           style: {
-            position: 'relative', margin: 0, padding: '7px 1px 9px',
+            position: 'relative', margin: 0, padding: '6px 1px',
             background: 'none', border: 0, cursor: 'pointer', font: 'inherit',
-            fontSize: '1em', lineHeight: '20px',
+            fontSize: '1em', lineHeight: 1.5,
             color: active
               ? 'var(--dsw-alias-label-primary, inherit)'
               : 'var(--dsw-alias-label-tertiary, rgba(128,128,128,.9))',
@@ -256,7 +256,9 @@ window.__ModuleLoader__.load({
       const healthLabel =
         modelOk === null ? t.healthUnknown :
         modelOk ? t.healthOk : t.healthDegraded;
-      const header = h('div', { style: { padding: 0 } },
+      // Title and auth lines live in one column with the SAME gap the outer
+      // stack uses, so the three visible rows read as evenly spaced.
+      const header = h('div', { style: { display: 'flex', flexDirection: 'column', gap: 10, padding: 0 } },
         // Title row: name on the left, health dot + version trailing it as
         // small print. Everything inherits the host font size so the card
         // tracks the DSH appearance settings.
@@ -295,7 +297,7 @@ window.__ModuleLoader__.load({
       return h('div', {
         style: {
           display: 'flex', flexDirection: 'column', gap: 10,
-          padding: 0, fontSize: 'inherit', lineHeight: 'inherit',
+          padding: 0, fontSize: 'inherit', lineHeight: 1.5,
         },
       },
         header,
