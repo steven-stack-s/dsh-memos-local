@@ -116,7 +116,7 @@ window.__ModuleLoader__.load({
       const [authBusy, setAuthBusy] = React.useState(false);
       const [authErr, setAuthErr] = React.useState(false);
       // Sub-tab selector: the general card plus three embedded viewer pages.
-      const [tab, setTab] = React.useState('import');
+      const [tab, setTab] = React.useState('settings');
       React.useEffect(() => {
         if (!ctx || !ctx.locale || typeof ctx.locale.subscribe !== 'function') return;
         const unsubscribe = ctx.locale.subscribe(() => setLang(getActiveLang()));
@@ -175,8 +175,8 @@ window.__ModuleLoader__.load({
         gap: 12, padding: '6px 0',
       };
       const tabs = [
-        { id: 'import', label: t.tabImport },
         { id: 'settings', label: t.tabSettings },
+        { id: 'import', label: t.tabImport },
         { id: 'help', label: t.tabHelp },
       ];
       const tabBar = h('div', {
@@ -211,9 +211,9 @@ window.__ModuleLoader__.load({
         h('div', { style: rowStyle }, authInfo, toggle),
       );
       const body =
-        tab === 'settings' ? frame('/settings', t.tabSettings) :
+        tab === 'import' ? frame('/import', t.tabImport) :
         tab === 'help' ? frame('/help', t.tabHelp) :
-        frame('/import', t.tabImport);
+        frame('/settings', t.tabSettings);
       return h('div', { style: { padding: '8px 0', fontSize: 13, lineHeight: 1.6 } },
         header,
         tabBar,
