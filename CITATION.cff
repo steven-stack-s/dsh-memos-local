@@ -1,0 +1,138 @@
+# Citation File Format (CFF) 1.2.0
+# https://citation-file-format.github.io/
+#
+# 说明: 本仓库是 MemOS 的 DSH fork, 自身没有独立的学术论文。
+# 因此 preferred-citation 指向底层记忆系统的 MemOS 论文 —— 这正是使用者应当引用的工作。
+cff-version: 1.2.0
+message: "If you use this plugin in academic work, please cite the underlying MemOS papers listed below."
+title: "dsh-memos-local: MemOS memory plugin for DeepSeek Harness"
+abstract: >-
+  A DeepSeek Harness (DSH) fork of the MemOS local memory plugin: layered
+  L1/L2/L3 memory, reflection-weighted value backpropagation, cross-task policy
+  induction, skill crystallization, and three-tier retrieval.
+type: software
+authors:
+  - alias: steven-stack-s
+    # 仅作为 fork 维护者; 上游作者见下方的 preferred-citation / references
+repository-code: "https://github.com/steven-stack-s/dsh-memos-local"
+url: "https://github.com/steven-stack-s/dsh-memos-local"
+license: MIT
+keywords:
+  - memory
+  - agent
+  - llm
+  - deepseek-harness
+  - memos
+  - retrieval
+preferred-citation:
+  type: article
+  title: "MemOS: A Memory OS for AI System"
+  authors:
+    - family-names: Li
+      given-names: Zhiyu
+    - family-names: Song
+      given-names: Shichao
+    - family-names: Xi
+      given-names: Chenyang
+    - family-names: Wang
+      given-names: Hanyu
+    - family-names: Tang
+      given-names: Chen
+    - family-names: Niu
+      given-names: Simin
+    - family-names: Chen
+      given-names: Ding
+    - family-names: Yang
+      given-names: Jiawei
+    - family-names: Li
+      given-names: Chunyu
+    - family-names: Yu
+      given-names: Qingchen
+    - family-names: Zhao
+      given-names: Jihao
+    - family-names: Wang
+      given-names: Yezhaohui
+    - family-names: Liu
+      given-names: Peng
+    - family-names: Lin
+      given-names: Zehao
+    - family-names: Wang
+      given-names: Pengyuan
+    - family-names: Huo
+      given-names: Jiahao
+    - family-names: Chen
+      given-names: Tianyi
+    - family-names: Chen
+      given-names: Kai
+    - family-names: Li
+      given-names: Kehang
+    - family-names: Tao
+      given-names: Zhen
+    - family-names: Ren
+      given-names: Junpeng
+    - family-names: Lai
+      given-names: Huayi
+    - family-names: Wu
+      given-names: Hao
+    - family-names: Tang
+      given-names: Bo
+    - family-names: Wang
+      given-names: Zhenren
+    - family-names: Fan
+      given-names: Zhaoxin
+    - family-names: Zhang
+      given-names: Ningyu
+    - family-names: Zhang
+      given-names: Linfeng
+    - family-names: Yan
+      given-names: Junchi
+    - family-names: Yang
+      given-names: Mingchuan
+    - family-names: Xu
+      given-names: Tong
+    - family-names: Xu
+      given-names: Wei
+    - family-names: Chen
+      given-names: Huajun
+    - family-names: Wang
+      given-names: Haofeng
+    - family-names: Yang
+      given-names: Hongkang
+    - family-names: Zhang
+      given-names: Wentao
+    - family-names: Xu
+      given-names: Zhi-Qin John
+    - family-names: Chen
+      given-names: Siheng
+    - family-names: Xiong
+      given-names: Feiyu
+  journal: "arXiv preprint arXiv:2507.03724"
+  year: 2025
+  url: "https://arxiv.org/abs/2507.03724"
+references:
+  - type: article
+    title: "MemOS: An Operating System for Memory-Augmented Generation (MAG) in Large Language Models"
+    authors:
+      - family-names: Li
+        given-names: Zhiyu
+      - family-names: Song
+        given-names: Shichao
+      - family-names: Wang
+        given-names: Hanyu
+      - family-names: Niu
+        given-names: Simin
+      - family-names: Chen
+        given-names: Ding
+      - family-names: Yang
+        given-names: Jiawei
+      - family-names: Xi
+        given-names: Chenyang
+      - family-names: Lai
+        given-names: Huayi
+      - family-names: Zhao
+        given-names: Jihao
+      - family-names: Wang
+        given-names: Yezhaohui
+    journal: "arXiv preprint arXiv:2505.22101"
+    year: 2025
+    url: "https://arxiv.org/abs/2505.22101"
