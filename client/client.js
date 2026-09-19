@@ -29,6 +29,7 @@ window.__ModuleLoader__.load({
       statusOnline: '查看器在线（端口 18801）',
       statusOffline: '查看器离线 / 不可达',
       statusChecking: '正在检查查看器状态…',
+      versionLabel: '版本',
       open: '打开记忆查看器',
       authOn: '密码保护已开启',
       authOff: '密码保护已关闭',
@@ -49,6 +50,7 @@ window.__ModuleLoader__.load({
       statusOnline: 'Viewer online on port 18801',
       statusOffline: 'Viewer offline / unreachable',
       statusChecking: 'Checking viewer status…',
+      versionLabel: 'Version',
       open: 'Open Memory Viewer',
       authOn: 'Password protection enabled',
       authOff: 'Password protection disabled',
@@ -109,6 +111,7 @@ window.__ModuleLoader__.load({
       const ctx = applyCtx;
       const [lang, setLang] = React.useState(getActiveLang());
       const [state, setState] = React.useState('checking');
+      const [version, setVersion] = React.useState(null);
       // null means the auth status has not been read yet.
       const [authEnabled, setAuthEnabled] = React.useState(null);
       const [authBusy, setAuthBusy] = React.useState(false);
@@ -130,6 +133,16 @@ window.__ModuleLoader__.load({
             if (body && typeof body.enabled === 'boolean') setAuthEnabled(body.enabled);
           })
           .catch(() => { setState('offline'); setAuthEnabled(null); });
+        // Plugin version, shown ahead of the viewer status line. The health
+        // endpoint reports the core's pkgVersion (falls back to "dev").
+        fetch('/memos/api/v1/health', { signal: AbortSignal.timeout(2500) })
+          .then((res) => (res.ok ? res.json() : null))
+          .then((body) => {
+            if (body && typeof body.version === 'string' && body.version) {
+              setVersion(body.version);
+            }
+          })
+          .catch(() => {});
       };
       React.useEffect(() => { refresh(); }, []);
       const t = lang === 'zh' ? zh : en;
@@ -137,6 +150,8 @@ window.__ModuleLoader__.load({
       const statusText =
         state === 'online' ? t.statusOnline :
         state === 'offline' ? t.statusOffline : t.statusChecking;
+      // Version pill sits BEFORE the status text, per the DSH settings layout.
+      const versionText = version ? ('v' + version) : '';
       const toggle = h('button', {
         onClick: async () => {
           if (authBusy || authEnabled === null) return;
@@ -204,7 +219,17 @@ window.__ModuleLoader__.load({
         sandbox: 'allow-same-origin allow-scripts allow-forms allow-popups',
       });
       const header = h('div', { style: { padding: '8px 0', fontSize: 13, lineHeight: 1.6 } },
-        h('div', {}, statusText),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+          versionText ? h('span', {
+            title: t.versionLabel,
+            style: {
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontSize: 12, padding: '1px 7px', borderRadius: 999,
+              border: '1px solid rgba(128,128,128,.35)', opacity: 0.85,
+            },
+          }, versionText) : null,
+          h('span', {}, statusText),
+        ),
         h('div', { style: rowStyle }, authInfo, toggle),
       );
       const body =

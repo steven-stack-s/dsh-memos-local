@@ -6,7 +6,7 @@ import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import type { Session, SessionEvent } from "@deepseek-ai/dsh-session";
 import type {} from "@deepseek-ai/dsh-system-prompt";
 import Schema from "@deepseek-ai/schemastery";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -155,6 +155,34 @@ export function resolveDeepSeekHarnessViewerStaticRoot(
   return resolve(pluginRoot, "viewer", "dist");
 }
 
+/**
+ * Resolve this plugin's package version for `bootstrapMemoryCore`.
+ *
+ * The version surfaces through `core.health().version` and therefore in the
+ * Viewer sidebar and the `/api/v1/health` payload. Without it the core falls
+ * back to the literal `"dev"`, which is what made the sidebar render `vdev`.
+ *
+ * Best-effort: a missing/unreadable manifest yields `undefined` so the
+ * caller keeps the core's own fallback instead of failing startup.
+ */
+export function resolveDeepSeekHarnessPluginVersion(
+  adapterDir: string = dirname(fileURLToPath(import.meta.url)),
+): string | undefined {
+  const runtimeRoot = resolve(adapterDir, "..", "..");
+  const pluginRoot = existsSync(resolve(runtimeRoot, "package.json"))
+    ? runtimeRoot
+    : dirname(runtimeRoot);
+  try {
+    const raw = readFileSync(resolve(pluginRoot, "package.json"), "utf8");
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === "string" && parsed.version.trim()
+      ? parsed.version.trim()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Keep the unauthenticated first-run Viewer strictly on local interfaces. */
 export function isDeepSeekHarnessViewerLoopbackHost(host: string): boolean {
   const normalized = host.trim().toLowerCase();
@@ -276,6 +304,9 @@ export async function apply(
       },
       home,
       config: memoryConfig,
+      // Surfaced via `health().version` → Viewer sidebar + /api/v1/health.
+      // Omitting this made the core fall back to "dev" (sidebar showed "vdev").
+      pkgVersion: resolveDeepSeekHarnessPluginVersion(),
       hostLlmBridge,
       autoRecovery: autoRecoveryEnabled,
       initLogging: false,
