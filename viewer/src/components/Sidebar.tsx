@@ -49,23 +49,11 @@ const SECTIONS: NavSection[] = [
       { path: "/logs", icon: "scroll-text", labelKey: "nav.logs" },
     ],
   },
-  {
-    titleKey: "nav.section.system",
-    items: [
-      { path: "/import", icon: "arrow-down-up", labelKey: "nav.import" },
-      // "Team Admin" used to be a standalone sidebar entry — it
-      // duplicated the Settings → Team Sharing tab and confused
-      // users about where to manage hub membership. Mirror the
-      // legacy viewer's IA: hub management lives exclusively under
-      // Settings and gets revealed as sub-options only when the
-      // user flips the "enable sharing" switch on that tab.
-      { path: "/settings", icon: "settings-2", labelKey: "nav.settings" },
-      // Documentation entry — explains every page's metadata
-      // (V/α/priority, skill statuses, share scopes, etc.) so users
-      // never have to guess what an unfamiliar score means.
-      { path: "/help", icon: "book-open", labelKey: "nav.help" },
-    ],
-  },
+  // Import/Export, Settings and Help used to live here. They are now
+  // hosted by the DSH Settings page (Memory → MemOS section), which
+  // embeds them as iframe sub-tabs entirely inside the DSH shell. The
+  // routes themselves stay alive in ContentRouter so those iframes (and
+  // old deep-links like #/settings?tab=models) keep working.
 ];
 
 export function Sidebar() {

@@ -39,6 +39,10 @@ window.__ModuleLoader__.load({
       authSwitchOff: '开启',
       authBusy: '处理中…',
       authErr: '操作失败，请稍后重试',
+      tabGeneral: '概览',
+      tabImport: '导入 / 导出',
+      tabSettings: '设置',
+      tabHelp: '帮助',
     };
     const en = {
       nav: 'Memory',
@@ -57,6 +61,10 @@ window.__ModuleLoader__.load({
       authSwitchOff: 'Enable',
       authBusy: 'Processing…',
       authErr: 'Operation failed, please retry',
+      tabGeneral: 'Overview',
+      tabImport: 'Import / Export',
+      tabSettings: 'Settings',
+      tabHelp: 'Help',
     };
 
     // --- Left nav icon (sidebar.panellist) ---
@@ -105,10 +113,12 @@ window.__ModuleLoader__.load({
       const ctx = applyCtx;
       const [lang, setLang] = React.useState(getActiveLang());
       const [state, setState] = React.useState('checking');
-      // authStatus: null=unknown, {enabled:bool}, 'err' on fetch failure
+      // null means the auth status has not been read yet.
       const [authEnabled, setAuthEnabled] = React.useState(null);
       const [authBusy, setAuthBusy] = React.useState(false);
       const [authErr, setAuthErr] = React.useState(false);
+      // Sub-tab selector: the general card plus three embedded viewer pages.
+      const [tab, setTab] = React.useState('general');
       React.useEffect(() => {
         if (!ctx || !ctx.locale || typeof ctx.locale.subscribe !== 'function') return;
         const unsubscribe = ctx.locale.subscribe(() => setLang(getActiveLang()));
@@ -123,26 +133,14 @@ window.__ModuleLoader__.load({
           .then((body) => {
             if (body && typeof body.enabled === 'boolean') setAuthEnabled(body.enabled);
           })
-          .catch(() => {
-            setState('offline');
-            setAuthEnabled(null);
-          });
+          .catch(() => { setState('offline'); setAuthEnabled(null); });
       };
       React.useEffect(() => { refresh(); }, []);
       const t = lang === 'zh' ? zh : en;
+      const langQuery = lang === 'zh' ? '?lang=zh' : '?lang=en';
       const statusText =
         state === 'online' ? t.statusOnline :
         state === 'offline' ? t.statusOffline : t.statusChecking;
-      // Layouts — re-created each render so DSH slot proxies re-read props.
-      const row = function () {
-        const kids = Array.prototype.slice.call(arguments);
-        return h('div', {
-          style: {
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            gap: 12, padding: '6px 0',
-          },
-        }, kids);
-      };
       const toggle = h('button', {
         onClick: async () => {
           if (authBusy || authEnabled === null) return;
@@ -168,23 +166,67 @@ window.__ModuleLoader__.load({
           color: '#fff', opacity: authBusy || authEnabled === null ? 0.6 : 1,
         },
       }, authBusy ? t.authBusy : (authEnabled ? t.authSwitchOn : t.authSwitchOff));
-      return h('div', { style: { padding: '8px 0', fontSize: 13, lineHeight: 1.6 } },
+      const authInfo = h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+        h('span', { style: { fontWeight: 600 } },
+          t.authLabel + ': ' + (authEnabled === null ? '\u2026' : (authEnabled ? t.authOn : t.authOff))),
+        h('span', { style: { opacity: 0.65, fontSize: 12 } }, t.authHint),
+        authErr ? h('span', { style: { color: '#ff4d4f', fontSize: 12 } }, t.authErr) : null,
+      );
+      const rowStyle = {
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 12, padding: '6px 0',
+      };
+      const tabs = [
+        { id: 'general', label: t.tabGeneral },
+        { id: 'import', label: t.tabImport },
+        { id: 'settings', label: t.tabSettings },
+        { id: 'help', label: t.tabHelp },
+      ];
+      const tabBar = h('div', {
+        style: { display: 'flex', gap: 6, flexWrap: 'wrap', margin: '4px 0 10px' },
+      }, tabs.map((item) => h('button', {
+        key: item.id,
+        type: 'button',
+        onClick: () => setTab(item.id),
+        style: {
+          margin: 0, padding: '4px 12px', borderRadius: 999, cursor: 'pointer',
+          fontSize: 12, fontWeight: 600,
+          border: '1px solid ' + (tab === item.id ? 'transparent' : 'rgba(128,128,128,.35)'),
+          background: tab === item.id ? '#6c279d' : 'transparent',
+          color: tab === item.id ? '#fff' : 'inherit',
+        },
+      }, item.label)));
+      // Same-origin iframe (through the DSH /memos proxy) so the embedded
+      // pages keep their own locale + auth handling and full functionality.
+      const frame = (hash, title) => h('iframe', {
+        key: tab + hash,
+        src: '/memos/' + langQuery + '#' + hash,
+        title,
+        style: {
+          width: '100%', height: '68vh', minHeight: 420,
+          border: '1px solid rgba(128,128,128,.28)', borderRadius: 8, background: '#fff',
+        },
+        sandbox: 'allow-same-origin allow-scripts allow-forms allow-popups',
+      });
+      const header = h('div', { style: { padding: '8px 0', fontSize: 13, lineHeight: 1.6 } },
         h('div', { style: { opacity: 0.75, marginBottom: 8 } }, t.desc),
         h('div', {}, statusText),
-        row(
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
-            h('span', { style: { fontWeight: 600 } }, t.authLabel + ': ' + (authEnabled === null ? '…' : (authEnabled ? t.authOn : t.authOff))),
-            h('span', { style: { opacity: 0.65, fontSize: 12 } }, t.authHint),
-            authErr ? h('span', { style: { color: '#ff4d4f', fontSize: 12 } }, t.authErr) : null,
-          ),
-          toggle,
-        ),
-        h('a', { href: '/memos/', target: '_blank', rel: 'noreferrer',
-          style: { color: 'inherit', textDecoration: 'underline', display: 'inline-block', marginTop: 8 } },
-          t.open),
+        h('div', { style: rowStyle }, authInfo, toggle),
+      );
+      const body =
+        tab === 'import' ? frame('/import', t.tabImport) :
+        tab === 'settings' ? frame('/settings', t.tabSettings) :
+        tab === 'help' ? frame('/help', t.tabHelp) : null;
+      return h('div', { style: { padding: '8px 0', fontSize: 13, lineHeight: 1.6 } },
+        header,
+        tabBar,
+        body,
+        tab === 'general' ? h('a', {
+          href: '/memos/', target: '_blank', rel: 'noreferrer',
+          style: { color: 'inherit', textDecoration: 'underline', display: 'inline-block', marginTop: 8 },
+        }, t.open) : null,
       );
     }
-
     // Shared state: the apply(ctx) that owns DSH locale access, and a ref
     // to the live iframe so postMessage can reach the viewer.
     let applyCtx = null;
