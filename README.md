@@ -277,33 +277,3 @@ protocol, logging, and release docs.
 See also the [DeepSeek Harness adapter guide](./adapters/deepseek-harness/README.md)
 for exact Node compatibility, `DSH_HOME`, restart/uninstall steps, viewer
 lifecycle, and the reviewed pnpm approval flow.
-
-## Citation
-
-This plugin is a DeepSeek Harness fork of **MemOS**
-([`@memtensor/memos-local-plugin`](https://www.npmjs.com/package/@memtensor/memos-local-plugin)).
-The underlying memory system is described in these papers — please cite them if
-you use this plugin in academic work. Machine-readable metadata lives in
-[`CITATION.cff`](./CITATION.cff), so GitHub also shows a **Cite this repository**
-button in the sidebar:
-
-```bibtex
-@article{li2025memos_long,
-  title={MemOS: A Memory OS for AI System},
-  author={Li, Zhiyu and Song, Shichao and Xi, Chenyang and Wang, Hanyu and Tang, Chen and Niu, Simin and Chen, Ding and Yang, Jiawei and Li, Chunyu and Yu, Qingchen and Zhao, Jihao and Wang, Yezhaohui and Liu, Peng and Lin, Zehao and Wang, Pengyuan and Huo, Jiahao and Chen, Tianyi and Chen, Kai and Li, Kehang and Tao, Zhen and Ren, Junpeng and Lai, Huayi and Wu, Hao and Tang, Bo and Wang, Zhenren and Fan, Zhaoxin and Zhang, Ningyu and Zhang, Linfeng and Yan, Junchi and Yang, Mingchuan and Xu, Tong and Xu, Wei and Chen, Huajun and Wang, Haofeng and Yang, Hongkang and Zhang, Wentao and Xu, Zhi-Qin John and Chen, Siheng and Xiong, Feiyu},
-  journal={arXiv preprint arXiv:2507.03724},
-  year={2025},
-  url={https://arxiv.org/abs/2507.03724}
-}
-```
-
-```bibtex
-@article{li2025memos_short,
-  title={MemOS: An Operating System for Memory-Augmented Generation (MAG) in Large Language Models},
-  author={Li, Zhiyu and Song, Shichao and Wang, Hanyu and Niu, Simin and Chen, Ding and Yang, Jiawei and Xi, Chenyang and Lai, Huayi and Zhao, Jihao and Wang, Yezhaohui and others},
-  journal={arXiv preprint arXiv:2505.22101},
-  year={2025},
-  url={https://arxiv.org/abs/2505.22101}
-}
-```
-
