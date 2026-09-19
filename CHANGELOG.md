@@ -3,37 +3,6 @@
 Notable changes to `dsh-memos-local`. Maintained by hand; for the full
 per-commit history use `git log` or the GitHub releases page.
 
-## [v2.0.20]
-
-### Fixed
-
-- **The browser module id now equals the package name**, so the client bundle
-  actually activates in the DSH web shell. The package moved to a scoped name
-  (`@steven-stack-s/dsh-memos-local`) but `client/client.js` kept registering
-  the pre-scope id `dsh-memos-local`. DSH's client-module loader keys graph
-  entries by **package name** and looks the factory up by that exact string, so
-  the lookup failed and the browser reported the plugin as unloadable:
-
-      web boot: 1 entry did not activate
-      @steven-stack-s/dsh-memos-local: import failed
-
-  Convention now followed: a scoped package registers its full name
-  (`@xgone/dsh-remote`), an unscoped one its bare name (`dsh-power-button`).
-
-### Distribution
-
-- **Version bump only** (`2.0.19` -> `2.0.20`); no code change beyond the fix
-  above. The client-id fix was committed (`086c3655`) *after* `2.0.19` had
-  already been published, and npm registries reject re-publishing an existing
-  version — so the fix could not reach installs under that number. As a result
-  tag `v2.0.19` contains the fix while the published `2.0.19` artifact does
-  not. **Install `2.0.20` (or later) to get it.**
-
-### Compatibility
-
-- Supersedes the `v2.0.19` note claiming the browser module id "stays
-  `dsh-memos-local`". That was the bug, not a design constraint.
-
 ## [v2.0.19]
 
 ### Distribution
