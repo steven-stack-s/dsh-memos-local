@@ -62,24 +62,75 @@ dsh plugin --profile web add \
 
 ## Version policy
 
-**The version tracks upstream `@memtensor/memos-local-plugin` exactly.** This
-fork does not carry its own version series: when upstream publishes `2.0.19`
-we publish `2.0.19`, and `package.json.version` must equal the git tag minus
-its `v` prefix (`v2.0.19` ⇄ `"version": "2.0.19"`).
+**A version has two parts: the upstream baseline, plus a local revision.**
 
-Both publish workflows (`publish-npmjs.yml`, `publish-github-packages.yml`)
-enforce this — a tag that does not match `package.json.version` fails the
-build. To bump:
+```
+<upstream-version> + dsh.<local-revision>
+      2.0.19       +     dsh.1
+```
+
+- `2.0.19` is the upstream `@memtensor/memos-local-plugin` release this fork is
+  synced to. It says *which upstream code the algorithms match*.
+- `+dsh.N` is **this fork's own revision counter** within that baseline. It
+  increments on every fork-only change we publish (`2.0.19+dsh.1`,
+  `2.0.19+dsh.2`, …), and resets to `dsh.1` when we move to a new upstream
+  baseline (`2.0.20+dsh.1`).
+
+The `+` segment is semver **build metadata**: it is part of the version string
+and part of the registry's uniqueness check, but it is *ignored* when versions
+are compared for precedence. That is deliberate — `2.0.19+dsh.1` still
+satisfies a `^2.0.19` range, so consumers resolve it normally. A prerelease
+form such as `2.0.19-dsh.1` would sort *below* `2.0.19` and fall out of range
+matches; do not use it.
+
+### Tag ⇄ version mapping
+
+git refs cannot carry `+` unambiguously, so tags use `-` where the version uses
+`+`:
+
+| `package.json` version | git tag |
+| --- | --- |
+| `2.0.19+dsh.1` | `v2.0.19-dsh.1` |
+| `2.0.19+dsh.2` | `v2.0.19-dsh.2` |
+| `2.0.20+dsh.1` | `v2.0.20-dsh.1` |
+
+Both publish workflows normalize the tag back to the `+` form and fail if it
+does not match `package.json.version`.
+
+### Why a local revision series exists
+
+Because **npm version numbers are permanent**. Publishing is not reversible in
+the way it looks: `npm unpublish` deletes the *artifacts*, but the version
+number stays burned — the registry keeps a tombstone in the packument's `time`
+table and refuses any later publish of that number with
+`400 Cannot publish over previously published version`. Re-using an upstream
+number therefore permanently consumes it, and a fork that tracks upstream
+exactly will eventually have nothing left to publish. The `+dsh.N` series gives
+every fork release a fresh, never-used version string.
+
+### Bumping
 
 ```bash
-# 1. set package.json version to the upstream release you synced
+# 1. set the version in package.json
+#      fork-only change on the same baseline:  2.0.19+dsh.1 -> 2.0.19+dsh.2
+#      synced to a new upstream release:       2.0.20+dsh.1
+node -e "
+  const fs = require('fs');
+  const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  p.version = '2.0.19+dsh.2';            // <-- edit me
+  fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
+"
 # 2. refresh the in-repo build output
 npm run build:package
-# 3. commit, tag, push
-git commit -am 'chore: sync upstream <version>'
-git tag -a v<version> -m 'v<version>'
-git push origin main --tags   # triggers both publish workflows
+# 3. commit and tag (tag uses '-' for the '+' in the version)
+git commit -am 'chore(release): v2.0.19+dsh.2'
+git tag -a v2.0.19-dsh.2 -m 'v2.0.19+dsh.2'
+git push origin main --tags
 ```
+
+> A tag push only runs a **dry-run** package check. Actually publishing requires
+> a manual `workflow_dispatch` run with `dry_run: false`. See the release notes
+> in the workflow files.
 
 ## Relation to upstream (subtree sync)
 
@@ -184,6 +235,12 @@ global package-manager setup:
 curl -fsSL https://raw.githubusercontent.com/MemTensor/MemOS/main/apps/memos-local-plugin/install.sh \
   | bash -s -- --agent dsh --profile web --version 2.0.19
 ```
+
+> `--version 2.0.19` here is the **upstream** `@memtensor/memos-local-plugin`
+> release, not this fork's version. The installer lives in the upstream repo and
+> installs the upstream package; this fork publishes its own
+> `@steven-stack-s/dsh-memos-local` at `<upstream>+dsh.<n>` (see
+> [Version policy](#version-policy)).
 
 The installer delegates package ownership and bundle reconciliation to
 `dsh plugin`. If pnpm reports the reviewed build-script set, it enables

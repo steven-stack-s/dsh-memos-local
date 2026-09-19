@@ -3,6 +3,40 @@
 Notable changes to `dsh-memos-local`. Maintained by hand; for the full
 per-commit history use `git log` or the GitHub releases page.
 
+## [v2.0.19+dsh.1]
+
+### Versioning — the fork now carries its own revision series
+
+**Breaking change to the version policy.** Until now the version tracked
+upstream `@memtensor/memos-local-plugin` exactly; it is now
+`<upstream-version>+dsh.<local-revision>` (e.g. `2.0.19+dsh.1`), and git tags
+use `-` where the version uses `+` (`v2.0.19-dsh.1`).
+
+Rationale: **npm version numbers are permanent.** When a version is
+unpublished, the registry deletes the artifacts but keeps a tombstone in the
+packument's `time` table, and rejects any later publish of that number with
+`400 Cannot publish over previously published version`. On 2026-09-19 both
+`2.0.19` and `2.0.20` were unpublished from npmjs, which permanently burned
+those numbers — a fork that mirrors upstream numbers runs out of publishable
+versions. See README "Version policy" for the full rules.
+
+`+dsh.N` is semver build metadata: it participates in the registry's
+uniqueness check but is ignored in precedence comparisons, so `2.0.19+dsh.1`
+still satisfies a `^2.0.19` range. A prerelease form (`2.0.19-dsh.1`) was
+rejected because it sorts below `2.0.19` and falls out of range matches.
+
+### Publishing safety
+
+- **`publish-npmjs.yml` no longer publishes blindly.** A tag push now runs
+  `npm publish --dry-run` only; a real publish requires a manual
+  `workflow_dispatch` run with `dry_run: false`.
+- **Pre-flight version check.** Before publishing, the workflow queries the
+  registry and fails fast if the version is already used — including versions
+  that were unpublished but remain tombstoned in `time`. The previous failure
+  mode (`400` after a full build) is now caught before the build.
+- Both workflows normalize the `-` in the tag back to `+` when comparing
+  against `package.json.version`.
+
 ## [v2.0.19]
 
 ### Distribution

@@ -14,7 +14,8 @@
 # 包名必须是作用域包名(@steven-stack-s/dsh-memos-local) —— GitHub Packages
 # 只接受 scoped 包名。
 #
-# 版本策略: 与上游 @memtensor/memos-local-plugin 严格一致(见 README)。
+# 版本策略: `<上游版本>+dsh.<本地修订号>` (例如 2.0.19+dsh.1); git tag 用 `-`
+# 代替 `+` (v2.0.19-dsh.1)。与 npmjs 主目标保持同一版本体系, 见 README。
 # 发布前校验 tag 与 package.json 的 version 是否一致, 不一致直接失败。
 # ============================================================================
 name: publish-github-packages
@@ -51,10 +52,16 @@ jobs:
         run: |
           set -eu
           TAG="${GITHUB_REF_NAME}"
-          PKG="v$(node -p "require('./package.json').version")"
-          echo "tag=$TAG pkg=$PKG"
-          if [ "$TAG" != "$PKG" ]; then
-            echo "::error::tag $TAG 与 package.json 版本 $PKG 不一致; 版本必须严格对齐上游"
+          # tag 用 `-` 表示 semver 的 `+` build metadata 段:
+          #   tag v2.0.19-dsh.1  ⇄  package.json "2.0.19+dsh.1"
+          EXPECTED="$(node -p "
+            const v = require('./package.json').version;
+            'v' + v.replace('+', '-');
+          ")"
+          echo "tag=$TAG expected_tag=$EXPECTED"
+          if [ "$TAG" != "$EXPECTED" ]; then
+            echo "::error::tag $TAG 与 package.json 版本不匹配 (期望 $EXPECTED)"
+            echo "::error::约定: package.json 用 '+' (2.0.19+dsh.1), git tag 用 '-' (v2.0.19-dsh.1)"
             exit 1
           fi
 

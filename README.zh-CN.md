@@ -58,22 +58,71 @@ dsh plugin --profile web add \
 
 ## 版本策略
 
-**版本严格跟随上游 `@memtensor/memos-local-plugin`。** 本 fork 不维护独立的版本序列：
-上游发布 `2.0.19`，我们就发布 `2.0.19`；且 `package.json.version` 必须等于 git tag
-去掉 `v` 前缀后的值（`v2.0.19` ⇄ `"version": "2.0.19"`）。
+**版本号由两部分组成：上游基线 + 本地修订号。**
 
-两个发布 workflow（`publish-npmjs.yml`、`publish-github-packages.yml`）都会强制校验这一点——
-tag 与 `package.json.version` 不一致会导致构建失败。升级步骤：
+```
+<上游版本> + dsh.<本地修订号>
+   2.0.19   +     dsh.1
+```
+
+- `2.0.19` 是本 fork 所同步的上游 `@memtensor/memos-local-plugin` 版本，
+  表示*算法与上游哪一版对齐*。
+- `+dsh.N` 是**本 fork 自己的修订计数器**，在同一上游基线内每发一次
+  fork 专属改动就递增（`2.0.19+dsh.1`、`2.0.19+dsh.2`……）；
+  切换到新的上游基线时重置为 `dsh.1`（`2.0.20+dsh.1`）。
+
+`+` 段是 semver 的 **build metadata**：它是版本字符串的一部分、也参与 registry
+的唯一性校验，但在**比较优先级时被忽略**。这是刻意选择的——`2.0.19+dsh.1`
+仍然满足 `^2.0.19` 范围，使用者能正常解析到它。而形如 `2.0.19-dsh.1` 的
+prerelease 写法会排在 `2.0.19` **之下**、掉出范围匹配，不要使用。
+
+### tag ⇄ 版本号映射
+
+git ref 无法无歧义地承载 `+`，因此 tag 里用 `-` 代替版本号中的 `+`：
+
+| `package.json` 版本 | git tag |
+| --- | --- |
+| `2.0.19+dsh.1` | `v2.0.19-dsh.1` |
+| `2.0.19+dsh.2` | `v2.0.19-dsh.2` |
+| `2.0.20+dsh.1` | `v2.0.20-dsh.1` |
+
+两个发布 workflow 都会把 tag 归一化回 `+` 形式，不一致则直接失败。
+
+### 为什么需要本地修订号
+
+因为 **npm 的版本号是永久的**。发布并不像看起来那样可逆：`npm unpublish`
+删掉的是*产物*，版本号本身仍然作废——registry 会在 packument 的 `time` 表里
+留下墓碑，之后任何对该号的发布都会被拒绝：
+
+```
+400 Cannot publish over previously published version "2.0.19"
+```
+
+所以复用上游版本号会**永久消耗**它。若严格跟随上游版本号，这个 fork 迟早会
+无号可发。`+dsh.N` 序列让每次 fork 发布都有一个全新的、从未被占用的版本号。
+
+### 升级步骤
 
 ```bash
-# 1. 把 package.json 的 version 设为所同步的上游版本
+# 1. 改 package.json 的 version
+#      同一基线上的 fork 改动:  2.0.19+dsh.1 -> 2.0.19+dsh.2
+#      同步到新的上游版本:       2.0.20+dsh.1
+node -e "
+  const fs = require('fs');
+  const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  p.version = '2.0.19+dsh.2';            // <-- 改这里
+  fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
+"
 # 2. 刷新入库的构建产物
 npm run build:package
-# 3. 提交、打 tag、推送
-git commit -am 'chore: sync upstream <版本>'
-git tag -a v<版本> -m 'v<版本>'
-git push origin main --tags   # 触发两个发布 workflow
+# 3. 提交、打 tag（tag 用 '-' 代替版本号里的 '+'）
+git commit -am 'chore(release): v2.0.19+dsh.2'
+git tag -a v2.0.19-dsh.2 -m 'v2.0.19+dsh.2'
+git push origin main --tags
 ```
+
+> 推 tag 只会跑一次**打包 dry-run 校验**。真正发布需要手动触发
+> `workflow_dispatch` 并把 `dry_run` 设为 `false`。详见各 workflow 文件内的说明。
 
 ## 与上游的关系（subtree 同步）
 
@@ -169,6 +218,11 @@ DSH 支持是一个"out-of-tree"的 Cordis bundle。一键安装器把包所有�
 curl -fsSL https://raw.githubusercontent.com/MemTensor/MemOS/main/apps/memos-local-plugin/install.sh \
   | bash -s -- --agent dsh --profile web --version 2.0.19
 ```
+
+> 这里的 `--version 2.0.19` 指的是**上游** `@memtensor/memos-local-plugin` 的版本，
+> 不是本 fork 的版本。该安装器位于上游仓库、安装的是上游包；本 fork 发布的是
+> 自己的 `@steven-stack-s/dsh-memos-local`，版本形如 `<上游版本>+dsh.<n>`
+> （见[版本策略](#版本策略)）。
 
 如果 `pnpm` 不在 `PATH` 上，它会为该次安装准备一个隔离的 `pnpm@11.7.0`，
 不改动用户的全局包管理器设置；安装器退出时会移除这个临时 pnpm。
