@@ -181,8 +181,9 @@ window.__ModuleLoader__.load({
           color: '#fff', opacity: authBusy || authEnabled === null ? 0.6 : 1,
         },
       }, authBusy ? t.authBusy : (authEnabled ? t.authSwitchOn : t.authSwitchOff));
+      // Same size/weight as the tab labels so the card reads as one block.
       const authInfo = h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
-        h('span', { style: { fontWeight: 600 } },
+        h('span', { style: { fontSize: '1em', fontWeight: 500, lineHeight: 1.5 } },
           t.authLabel + ': ' + (authEnabled === null ? '\u2026' : (authEnabled ? t.authOn : t.authOff))),
         authErr ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary, #e5484d)', fontSize: '0.85em', opacity: 0.9 } }, t.authErr) : null,
       );
@@ -202,7 +203,7 @@ window.__ModuleLoader__.load({
         style: {
           display: 'flex', alignItems: 'flex-end', gap: 22,
           borderBottom: '0.5px solid var(--dsw-alias-border-l2, rgba(128,128,128,.28))',
-          margin: '6px 0 8px',
+
         },
       }, tabs.map((item) => {
         const active = tab === item.id;
@@ -255,14 +256,13 @@ window.__ModuleLoader__.load({
       const healthLabel =
         modelOk === null ? t.healthUnknown :
         modelOk ? t.healthOk : t.healthDegraded;
-      const header = h('div', { style: { padding: '0 0 6px' } },
+      const header = h('div', { style: { padding: 0 } },
         // Title row: name on the left, health dot + version trailing it as
         // small print. Everything inherits the host font size so the card
         // tracks the DSH appearance settings.
         h('div', {
           style: {
             display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-            marginBottom: 4,
           },
         },
           h('span', { style: { fontSize: '1.06em', fontWeight: 600 } }, t.title),
@@ -292,7 +292,12 @@ window.__ModuleLoader__.load({
         tab === 'import' ? frame('/import', t.tabImport) :
         tab === 'help' ? frame('/help', t.tabHelp) :
         frame('/settings', t.tabSettings);
-      return h('div', { style: { padding: 0, fontSize: 'inherit', lineHeight: 'inherit' } },
+      return h('div', {
+        style: {
+          display: 'flex', flexDirection: 'column', gap: 10,
+          padding: 0, fontSize: 'inherit', lineHeight: 'inherit',
+        },
+      },
         header,
         tabBar,
         body,
