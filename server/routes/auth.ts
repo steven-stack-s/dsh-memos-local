@@ -123,6 +123,25 @@ function authPath(homeDir: string): string {
   return join(homeDir, ".auth.json");
 }
 
+/**
+ * Path of the "auth disabled" marker. When this file exists the viewer
+ * treats password protection as switched OFF (no login interception) even
+ * though `.auth.json` (and its password) is still on disk — so flipping
+ * the switch back ON never requires re-entering a password.
+ */
+function authDisabledPath(homeDir: string): string {
+  return join(homeDir, ".auth-disabled");
+}
+
+/** True when the operator switched password protection off via the toggle. */
+export function isAuthDisabled(homeDir: string): boolean {
+  try {
+    return existsSync(authDisabledPath(homeDir));
+  } catch {
+    return false;
+  }
+}
+
 export function readAuthState(homeDir: string): AuthState | null {
   const p = authPath(homeDir);
   if (!existsSync(p)) return null;
@@ -267,6 +286,12 @@ export function registerAuthRoutes(
       // open to preserve existing test behaviour.
       return { enabled: false, needsSetup: false, authenticated: true };
     }
+    // Operator switched password protection OFF via the settings toggle:
+    // report the app as unlocked (no setup, no login) even though the
+    // password `.auth.json` is still on disk for a no-friction re-enable.
+    if (isAuthDisabled(root)) {
+      return { enabled: false, needsSetup: false, authenticated: true };
+    }
     const state = readAuthState(root);
     if (!state) {
       // No password configured yet. First-run flow: frontend must
@@ -384,6 +409,56 @@ export function registerAuthRoutes(
     clearSessionCookie(ctx.res, agent);
     return { ok: true };
   });
+
+  /**
+   * POST /api/v1/auth/disable - switch password protection OFF without
+   * deleting the existing password. Writes a .auth-disabled marker next
+   * to .auth.json; requireSession then lets every request through and
+   * auth/status reports the app as unlocked. Flipping the settings
+   * toggle back ON (auth/enable) simply removes the marker, so the old
+   * password still works - no re-setup required.
+   */
+  routes.set("POST /api/v1/auth/disable", async (ctx) => {
+    const root = homeRoot();
+    if (!root) {
+      writeError(ctx, 503, "unavailable", "home not configured");
+      return;
+    }
+    const marker = authDisabledPath(root);
+    try {
+      mkdirSync(dirname(marker), { recursive: true });
+      writeFileSync(marker, JSON.stringify({ disabledAt: Date.now() }), "utf8");
+      try { chmodSync(marker, 0o600); } catch { /* best-effort */ }
+    } catch {
+      writeError(ctx, 500, "internal", "failed to write auth-disabled marker");
+      return;
+    }
+    return { ok: true, enabled: false };
+  });
+
+  /**
+   * POST /api/v1/auth/enable - switch password protection back ON by
+   * removing the .auth-disabled marker. The previously-set password is
+   * untouched, so auth/status returns needsSetup:false and the user
+   * logs in with their old password. If no password was ever set, the
+   * first-run needsSetup flow resumes as usual.
+   */
+  routes.set("POST /api/v1/auth/enable", async (ctx) => {
+    const root = homeRoot();
+    if (!root) {
+      writeError(ctx, 503, "unavailable", "home not configured");
+      return;
+    }
+    const marker = authDisabledPath(root);
+    if (existsSync(marker)) {
+      try { (await import("node:fs")).unlinkSync(marker); }
+      catch {
+        writeError(ctx, 500, "internal", "failed to delete auth-disabled marker");
+        return;
+      }
+    }
+    return { ok: true, enabled: true };
+  });
 }
 
 /**
@@ -431,6 +506,11 @@ export function requireSession(
       remote === "::ffff:127.0.0.1";
     if (isLoopback) return true;
   }
+
+  // Operator switched password protection OFF via the settings toggle —
+  // allow everyone through (password `.auth.json` stays on disk so the
+  // switch can be flipped back without re-entering a password).
+  if (isAuthDisabled(homeDir)) return true;
 
   const state = readAuthState(homeDir);
   if (!state) return true; // password protection off → open

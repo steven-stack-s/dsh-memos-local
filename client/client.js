@@ -31,6 +31,14 @@ window.__ModuleLoader__.load({
       statusChecking: '正在检查查看器状态…',
       desc: '记忆插件（dsh-memos-local）。主机 agent 会自动捕获与检索记忆；查看器展示全部已存储条目。',
       open: '打开记忆查看器',
+      authOn: '密码保护已开启',
+      authOff: '密码保护已关闭',
+      authLabel: '认证',
+      authHint: '开启后访问记忆查看器需输入密码；关闭后直连 dsh-remote 认证，无需二次登录。',
+      authSwitchOn: '关闭',
+      authSwitchOff: '开启',
+      authBusy: '处理中…',
+      authErr: '操作失败，请稍后重试',
     };
     const en = {
       nav: 'Memory',
@@ -41,6 +49,14 @@ window.__ModuleLoader__.load({
       statusChecking: 'Checking viewer status…',
       desc: 'Memory plugin (dsh-memos-local). Memory is captured and retrieved by the host agent automatically; the viewer shows all stored items.',
       open: 'Open Memory Viewer',
+      authOn: 'Password protection enabled',
+      authOff: 'Password protection disabled',
+      authLabel: 'Authentication',
+      authHint: 'When enabled, viewing memory requires a password. Turn it off to rely on dsh-remote auth with no extra login.',
+      authSwitchOn: 'Disable',
+      authSwitchOff: 'Enable',
+      authBusy: 'Processing…',
+      authErr: 'Operation failed, please retry',
     };
 
     // --- Left nav icon (sidebar.panellist) ---
@@ -88,26 +104,78 @@ window.__ModuleLoader__.load({
     function MemorySettingsSection() {
       const ctx = applyCtx;
       const [lang, setLang] = React.useState(getActiveLang());
+      const [state, setState] = React.useState('checking');
+      // authStatus: null=unknown, {enabled:bool}, 'err' on fetch failure
+      const [authEnabled, setAuthEnabled] = React.useState(null);
+      const [authBusy, setAuthBusy] = React.useState(false);
+      const [authErr, setAuthErr] = React.useState(false);
       React.useEffect(() => {
         if (!ctx || !ctx.locale || typeof ctx.locale.subscribe !== 'function') return;
         const unsubscribe = ctx.locale.subscribe(() => setLang(getActiveLang()));
         return () => unsubscribe();
       }, []);
-      const [state, setState] = React.useState('checking');
-      React.useEffect(() => {
-        let alive = true;
+      const refresh = () => {
         fetch('/memos/api/v1/auth/status', { signal: AbortSignal.timeout(2500) })
-          .then((res) => { if (alive) setState(res.ok ? 'online' : 'offline'); })
-          .catch(() => { if (alive) setState('offline'); });
-        return () => { alive = false; };
-      }, []);
+          .then((res) => {
+            if (res.ok) { setState('online'); return res.json(); }
+            setState('offline'); return null;
+          })
+          .then((body) => {
+            if (body && typeof body.enabled === 'boolean') setAuthEnabled(body.enabled);
+          })
+          .catch(() => {
+            setState('offline');
+            setAuthEnabled(null);
+          });
+      };
+      React.useEffect(() => { refresh(); }, []);
       const t = lang === 'zh' ? zh : en;
       const statusText =
         state === 'online' ? t.statusOnline :
         state === 'offline' ? t.statusOffline : t.statusChecking;
+      // Layouts — re-created each render so DSH slot proxies re-read props.
+      const row = (children) => h('div', {
+        style: {
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 12, padding: '6px 0',
+        },
+      }, children);
+      const toggle = h('button', {
+        onClick: async () => {
+          if (authBusy || authEnabled === null) return;
+          setAuthBusy(true); setAuthErr(false);
+          const target = authEnabled ? 'disable' : 'enable';
+          try {
+            const res = await fetch('/memos/api/v1/auth/' + target, { method: 'POST' });
+            if (!res.ok) { setAuthErr(true); return; }
+            const body = await res.json().catch(() => ({}));
+            if (typeof body.enabled === 'boolean') setAuthEnabled(body.enabled);
+            else setAuthEnabled(!authEnabled);
+          } catch {
+            setAuthErr(true);
+          } finally {
+            setAuthBusy(false);
+          }
+        },
+        disabled: authBusy || authEnabled === null || state !== 'online',
+        style: {
+          margin: 0, padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+          fontSize: 12, fontWeight: 600, border: '1px solid transparent',
+          background: authEnabled ? '#ff4d4f' : '#2f8f4e',
+          color: '#fff', opacity: authBusy || authEnabled === null ? 0.6 : 1,
+        },
+      }, authBusy ? t.authBusy : (authEnabled ? t.authSwitchOn : t.authSwitchOff));
       return h('div', { style: { padding: '8px 0', fontSize: 13, lineHeight: 1.6 } },
         h('div', { style: { opacity: 0.75, marginBottom: 8 } }, t.desc),
         h('div', {}, statusText),
+        row(
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+            h('span', { style: { fontWeight: 600 } }, t.authLabel + ': ' + (authEnabled === null ? '…' : (authEnabled ? t.authOn : t.authOff))),
+            h('span', { style: { opacity: 0.65, fontSize: 12 } }, t.authHint),
+            authErr && h('span', { style: { color: '#ff4d4f', fontSize: 12 } }, t.authErr),
+          ),
+          toggle,
+        ),
         h('a', { href: '/memos/', target: '_blank', rel: 'noreferrer',
           style: { color: 'inherit', textDecoration: 'underline', display: 'inline-block', marginTop: 8 } },
           t.open),
