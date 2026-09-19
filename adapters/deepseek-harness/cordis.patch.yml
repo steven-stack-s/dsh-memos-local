@@ -1,6 +1,6 @@
 - insert:
     - id: memos-local-memory
-      name: 'dsh-memos-local'
+      name: '@steven-stack-s/dsh-memos-local'
       config:
         enabled: true
         profileId: default

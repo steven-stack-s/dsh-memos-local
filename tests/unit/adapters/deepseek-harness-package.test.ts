@@ -31,7 +31,7 @@ describe("DeepSeek Harness bundle package", () => {
         insert: [
           expect.objectContaining({
             id: "memos-local-memory",
-            name: "dsh-memos-local",
+            name: "@steven-stack-s/dsh-memos-local",
             config: expect.objectContaining({
               enabled: true,
               recallEnabled: true,

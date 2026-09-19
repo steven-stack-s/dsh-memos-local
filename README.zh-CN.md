@@ -7,6 +7,48 @@
 > 独立出来，完整保留提交历史。
 > 由 steven-stack-s 维护，专用于 DeepSeek Harness（DSH）。
 
+## 安装
+
+### 从 GitHub Packages（npm registry）
+
+```bash
+# .npmrc —— 把 @steven-stack-s 作用域指向 GitHub Packages
+echo '@steven-stack-s:registry=https://npm.pkg.github.com' >> ~/.npmrc
+echo '//npm.pkg.github.com/:_authToken=<你的_GITHUB_TOKEN>' >> ~/.npmrc
+
+dsh plugin --profile web add @steven-stack-s/dsh-memos-local
+```
+
+### 从 git tag 安装（不走 registry，国内网络可用）
+
+仓库已包含构建产物（`dist/`、`viewer/dist/`），因此从 git 安装无需构建步骤：
+
+```bash
+dsh plugin --profile web add \
+  'https://codeload.github.com/steven-stack-s/dsh-memos-local/tar.gz/refs/tags/v<版本>'
+```
+
+> `github:owner/repo#tag` 也可以，但它需要通过 git 协议访问 `github.com` 解析 ref；
+> 上面的 codeload 链接只需 `codeload.github.com` 可达。
+
+## 版本策略
+
+**版本严格跟随上游 `@memtensor/memos-local-plugin`。** 本 fork 不维护独立的版本序列：
+上游发布 `2.0.19`，我们就发布 `2.0.19`；且 `package.json.version` 必须等于 git tag
+去掉 `v` 前缀后的值（`v2.0.19` ⇄ `"version": "2.0.19"`）。
+
+发布 workflow 强制校验这一点——tag 与 `package.json.version` 不一致会导致构建失败。升级步骤：
+
+```bash
+# 1. 把 package.json 的 version 设为所同步的上游版本
+# 2. 刷新入库的构建产物
+npm run build:package
+# 3. 提交、打 tag、推送
+git commit -am 'chore: sync upstream <版本>'
+git tag -a v<版本> -m 'v<版本>'
+git push origin main --tags   # 触发 publish-npm.yml
+```
+
 ## 与上游的关系（subtree 同步）
 
 本仓库用 `git subtree split` 从 **MemTensor/MemOS** 单体仓库的

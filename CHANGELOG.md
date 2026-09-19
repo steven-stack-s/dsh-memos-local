@@ -5,6 +5,35 @@ per-commit history use `git log` or the GitHub releases page.
 
 ## [v2.0.19]
 
+### Distribution
+
+- **Published to GitHub Packages** as the scoped package
+  `@steven-stack-s/dsh-memos-local`, via the new `publish-npm.yml`
+  workflow (tag push → `npm publish`, using the built-in `GITHUB_TOKEN`;
+  no PAT required). GitHub Packages only accepts scoped names, hence the
+  rename from `dsh-memos-local`.
+- **Build output is committed** (`dist/`, `viewer/dist/`) so a plain git
+  install is runnable without a build step — the `dsh plugin` install path
+  does not run `prepare`, and `postinstall` only prints a notice. Source
+  maps stay excluded.
+- Install docs added for both routes (GitHub Packages registry and the
+  codeload tarball URL, which is the one that works behind the proxy here).
+
+### Version policy
+
+- **The version tracks upstream `@memtensor/memos-local-plugin` exactly.**
+  `package.json.version` must equal the tag without its `v` prefix; the
+  publish workflow fails the build otherwise.
+
+### Compatibility
+
+- The DSH-facing plugin identity is unchanged in spirit: the cordis loader
+  entry now resolves the scoped package name
+  (`@steven-stack-s/dsh-memos-local`) to match `dsh.profile.bundles`, while
+  the browser module id in `client/client.js` stays `dsh-memos-local`.
+
+## [v2.0.19] (version alignment)
+
 Version alignment with upstream `@memtensor/memos-local-plugin` **2.0.19**
 (released 2026-09-08). A file-by-file comparison against the published
 2.0.19 tarball showed the core algorithm tree already matched; only the

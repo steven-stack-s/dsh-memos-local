@@ -7,6 +7,52 @@
 > commit history preserved.
 > Maintained by steven-stack-s for DeepSeek Harness (DSH).
 
+## Install
+
+### From GitHub Packages (npm registry)
+
+```bash
+# .npmrc — route the @steven-stack-s scope to GitHub Packages
+echo '@steven-stack-s:registry=https://npm.pkg.github.com' >> ~/.npmrc
+echo '//npm.pkg.github.com/:_authToken=<YOUR_GITHUB_TOKEN>' >> ~/.npmrc
+
+dsh plugin --profile web add @steven-stack-s/dsh-memos-local
+```
+
+### From a git tag (no registry, works behind a proxy)
+
+The repository ships its build output (`dist/`, `viewer/dist/`), so a git
+install is runnable without a build step:
+
+```bash
+dsh plugin --profile web add \
+  'https://codeload.github.com/steven-stack-s/dsh-memos-local/tar.gz/refs/tags/v<version>'
+```
+
+> `github:owner/repo#tag` also works, but it resolves the ref over the git
+> protocol against `github.com`; the codeload URL above only needs
+> `codeload.github.com`.
+
+## Version policy
+
+**The version tracks upstream `@memtensor/memos-local-plugin` exactly.** This
+fork does not carry its own version series: when upstream publishes `2.0.19`
+we publish `2.0.19`, and `package.json.version` must equal the git tag minus
+its `v` prefix (`v2.0.19` ⇄ `"version": "2.0.19"`).
+
+The publish workflow enforces this — a tag that does not match
+`package.json.version` fails the build. To bump:
+
+```bash
+# 1. set package.json version to the upstream release you synced
+# 2. refresh the in-repo build output
+npm run build:package
+# 3. commit, tag, push
+git commit -am 'chore: sync upstream <version>'
+git tag -a v<version> -m 'v<version>'
+git push origin main --tags   # triggers publish-npm.yml
+```
+
 ## Relation to upstream (subtree sync)
 
 This repository was split out of the MemTensor/MemOS monorepo's
