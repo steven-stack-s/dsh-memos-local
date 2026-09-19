@@ -7,6 +7,17 @@
 > 独立出来，完整保留提交历史。
 > 由 steven-stack-s 维护，专用于 DeepSeek Harness（DSH）。
 
+## 界面截图
+
+**DSH 侧边栏中的记忆面板** —— 点击左侧「记忆」即可内嵌打开 MemOS 查看器，
+记忆浏览与日常 DSH 会话并列，无需切换窗口：
+
+![DSH 侧边栏中内嵌的记忆面板](docs/images/dsh-memory-overview.png)
+
+**设置 → 记忆（MemOS）** —— 认证开关、模型状态，以及内嵌的「设置 / 导入导出 / 帮助」页面：
+
+![DSH 设置中的「记忆（MemOS）」区](docs/images/dsh-memory-settings.png)
+
 ## 安装
 
 ### 从 npmjs 安装（推荐 —— 无需任何凭据）

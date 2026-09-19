@@ -7,6 +7,18 @@
 > commit history preserved.
 > Maintained by steven-stack-s for DeepSeek Harness (DSH).
 
+## Screenshots
+
+**Memory panel in the DSH shell** — the sidebar's *Memory* entry opens the
+MemOS viewer inline, so memory browsing sits next to your normal DSH session:
+
+![Memory panel embedded in the DSH sidebar](docs/images/dsh-memory-overview.png)
+
+**Settings → Memory (MemOS)** — authentication toggle, model status, and the
+embedded Settings / Import-Export / Help pages:
+
+![Memory (MemOS) section in DSH Settings](docs/images/dsh-memory-settings.png)
+
 ## Install
 
 ### From npmjs (recommended — no credentials needed)
