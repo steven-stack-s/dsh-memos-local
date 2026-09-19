@@ -108,7 +108,7 @@ global package-manager setup:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/MemTensor/MemOS/main/apps/memos-local-plugin/install.sh \
-  | bash -s -- --agent dsh --profile web --version 2.0.16
+  | bash -s -- --agent dsh --profile web --version 2.0.19
 ```
 
 The installer delegates package ownership and bundle reconciliation to

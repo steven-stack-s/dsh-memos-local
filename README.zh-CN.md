@@ -99,7 +99,7 @@ DSH 支持是一个"out-of-tree"的 Cordis bundle。一键安装器把包所有�
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/MemTensor/MemOS/main/apps/memos-local-plugin/install.sh \
-  | bash -s -- --agent dsh --profile web --version 2.0.16
+  | bash -s -- --agent dsh --profile web --version 2.0.19
 ```
 
 如果 `pnpm` 不在 `PATH` 上，它会为该次安装准备一个隔离的 `pnpm@11.7.0`，

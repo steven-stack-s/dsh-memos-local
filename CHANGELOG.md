@@ -3,6 +3,37 @@
 Notable changes to `dsh-memos-local`. Maintained by hand; for the full
 per-commit history use `git log` or the GitHub releases page.
 
+## [v2.0.19]
+
+Version alignment with upstream `@memtensor/memos-local-plugin` **2.0.19**
+(released 2026-09-08). A file-by-file comparison against the published
+2.0.19 tarball showed the core algorithm tree already matched; only the
+distribution-layer patches below differ, so this release is a version bump
+plus doc refresh rather than a code import.
+
+### Synced from upstream
+
+- Core/`agent-contract`/`server` sources match upstream 2.0.19 byte-for-byte
+  except for the intentional DSH patches listed below.
+- `version` bumped `2.0.16-beta.1` → `2.0.19`.
+
+### DSH-fork deltas kept (and why they survive a sync)
+
+- `core/embedding/providers/local.ts` — routes model downloads through
+  `hf-mirror.com` and persists the cache under `$DSH_HOME`, so first-run
+  embedding works behind the GFW.
+- `core/logger/index.ts` — default `tz` is `Asia/Shanghai` (overridable via
+  `MEMOS_TZ`/`TZ`) so log timestamps match the deployment timezone.
+- `server/routes/auth.ts` — optional password gate with the
+  `.auth-disabled` marker and the `auth/enable|disable` endpoints.
+- `adapters/deepseek-harness/` — the Cordis bundle, viewer proxy and
+  `cordis.patch.yml` (bare package name for DSH's client scanner).
+
+### Note
+
+`core/update-check` compares against the npm `latest` dist-tag. With this
+bump the running plugin no longer reports a phantom "newer version".
+
 ## [v2.0.16-beta.1]
 
 Initial DSH-oriented release of the `dsh-memos-local` fork (subtree-split
