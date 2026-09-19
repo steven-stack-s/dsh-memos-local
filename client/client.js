@@ -29,7 +29,6 @@ window.__ModuleLoader__.load({
       statusOnline: '查看器在线（端口 18801）',
       statusOffline: '查看器离线 / 不可达',
       statusChecking: '正在检查查看器状态…',
-      desc: '记忆插件（dsh-memos-local）。主机 agent 会自动捕获与检索记忆；查看器展示全部已存储条目。',
       open: '打开记忆查看器',
       authOn: '密码保护已开启',
       authOff: '密码保护已关闭',
@@ -50,7 +49,6 @@ window.__ModuleLoader__.load({
       statusOnline: 'Viewer online on port 18801',
       statusOffline: 'Viewer offline / unreachable',
       statusChecking: 'Checking viewer status…',
-      desc: 'Memory plugin (dsh-memos-local). Memory is captured and retrieved by the host agent automatically; the viewer shows all stored items.',
       open: 'Open Memory Viewer',
       authOn: 'Password protection enabled',
       authOff: 'Password protection disabled',
@@ -206,7 +204,6 @@ window.__ModuleLoader__.load({
         sandbox: 'allow-same-origin allow-scripts allow-forms allow-popups',
       });
       const header = h('div', { style: { padding: '8px 0', fontSize: 13, lineHeight: 1.6 } },
-        h('div', { style: { opacity: 0.75, marginBottom: 8 } }, t.desc),
         h('div', {}, statusText),
         h('div', { style: rowStyle }, authInfo, toggle),
       );
