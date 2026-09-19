@@ -1828,6 +1828,18 @@ export type Locale = "en" | "zh";
 const STORAGE_KEY = "memos.lang";
 
 function detectDefault(): Locale {
+  // DSH embeds the viewer in an iframe and drives its language via a
+  // ?lang= query param + postMessage. The URL param wins when present so
+  // the Memory panel follows the DSH web GUI language automatically.
+  if (typeof window !== "undefined" && window.location) {
+    try {
+      const q = new URLSearchParams(window.location.search);
+      const urlLang = q.get("lang");
+      if (urlLang === "en" || urlLang === "zh") return urlLang;
+    } catch {
+      // ignore malformed search
+    }
+  }
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === "en" || saved === "zh") return saved;
@@ -1876,3 +1888,25 @@ export function toggleLocale(): void {
 if (typeof document !== "undefined") {
   document.documentElement.setAttribute("lang", locale.value === "zh" ? "zh-CN" : "en");
 }
+
+// DSH hosts the viewer in an iframe on the web GUI. It pushes the active
+// language here so switching language in DSH updates the panel without a
+// reload. We only accept messages that carry the memos locale protocol.
+type MemosLocaleMessage = {
+  type: "memos:set-locale";
+  locale: Locale;
+};
+
+function initExternalLocaleSync(): void {
+  if (typeof window === "undefined") return;
+  window.addEventListener("message", (event: MessageEvent<MemosLocaleMessage>) => {
+    const data = event.data;
+    if (!data || typeof data !== "object" || data.type !== "memos:set-locale") return;
+    if (data.locale === "en" || data.locale === "zh") setLocale(data.locale);
+  });
+}
+
+// Start listening for parent-frame locale pushes (DSH web GUI) as soon as
+// this module loads. In a standalone browser context no such messages are
+// sent, so this is a no-op there.
+initExternalLocaleSync();
