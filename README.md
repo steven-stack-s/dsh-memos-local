@@ -9,20 +9,35 @@
 
 ## Install
 
-### From GitHub Packages (npm registry)
+### From npmjs (recommended — no credentials needed)
+
+```bash
+dsh plugin --profile web add @steven-stack-s/dsh-memos-local
+```
+
+`@steven-stack-s/dsh-memos-local` is published to the public npm registry, so
+anyone can install it anonymously. No token, no `.npmrc`, no GitHub account.
+
+### From GitHub Packages (requires a token)
+
+GitHub Packages mirrors the same version, but its npm registry requires
+authentication **even for a public package** — that is GitHub's documented
+behaviour, not a misconfiguration. Each user supplies their own token (any
+GitHub account, `read:packages` scope):
 
 ```bash
 # .npmrc — route the @steven-stack-s scope to GitHub Packages
 echo '@steven-stack-s:registry=https://npm.pkg.github.com' >> ~/.npmrc
-echo '//npm.pkg.github.com/:_authToken=<YOUR_GITHUB_TOKEN>' >> ~/.npmrc
+echo '//npm.pkg.github.com/:_authToken=<YOUR_OWN_GITHUB_TOKEN>' >> ~/.npmrc
 
 dsh plugin --profile web add @steven-stack-s/dsh-memos-local
 ```
 
-### From a git tag (no registry, works behind a proxy)
+### From a git tag (no registry at all)
 
 The repository ships its build output (`dist/`, `viewer/dist/`), so a git
-install is runnable without a build step:
+install is runnable without a build step — useful when a proxy blocks the
+registries:
 
 ```bash
 dsh plugin --profile web add \
@@ -40,8 +55,9 @@ fork does not carry its own version series: when upstream publishes `2.0.19`
 we publish `2.0.19`, and `package.json.version` must equal the git tag minus
 its `v` prefix (`v2.0.19` ⇄ `"version": "2.0.19"`).
 
-The publish workflow enforces this — a tag that does not match
-`package.json.version` fails the build. To bump:
+Both publish workflows (`publish-npmjs.yml`, `publish-github-packages.yml`)
+enforce this — a tag that does not match `package.json.version` fails the
+build. To bump:
 
 ```bash
 # 1. set package.json version to the upstream release you synced
@@ -50,7 +66,7 @@ npm run build:package
 # 3. commit, tag, push
 git commit -am 'chore: sync upstream <version>'
 git tag -a v<version> -m 'v<version>'
-git push origin main --tags   # triggers publish-npm.yml
+git push origin main --tags   # triggers both publish workflows
 ```
 
 ## Relation to upstream (subtree sync)

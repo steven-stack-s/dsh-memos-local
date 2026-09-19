@@ -7,9 +7,21 @@ per-commit history use `git log` or the GitHub releases page.
 
 ### Distribution
 
+- **Primary registry is now npmjs.org (public npm).** `@steven-stack-s/dsh-memos-local`
+  is published there via `publish-npmjs.yml`, so anyone can install it
+  anonymously — no token, no `.npmrc`, no GitHub account:
+  `dsh plugin --profile web add @steven-stack-s/dsh-memos-local`.
+- GitHub Packages remains as a mirror (`publish-github-packages.yml`), but
+  note its npm registry requires authentication **even for public packages**
+  (GitHub documents this: only the container registry allows anonymous pulls).
+- `publishConfig` now points at npmjs with `access: public`; the GitHub
+  Packages workflow overrides the registry explicitly.
+
+### Distribution (GitHub Packages)
+
 - **Published to GitHub Packages** as the scoped package
-  `@steven-stack-s/dsh-memos-local`, via the new `publish-npm.yml`
-  workflow (tag push → `npm publish`, using the built-in `GITHUB_TOKEN`;
+  `@steven-stack-s/dsh-memos-local`, via `publish-github-packages.yml`
+  (tag push → `npm publish`, using the built-in `GITHUB_TOKEN`;
   no PAT required). GitHub Packages only accepts scoped names, hence the
   rename from `dsh-memos-local`.
 - **Build output is committed** (`dist/`, `viewer/dist/`) so a plain git

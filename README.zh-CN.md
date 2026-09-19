@@ -9,19 +9,33 @@
 
 ## 安装
 
-### 从 GitHub Packages（npm registry）
+### 从 npmjs 安装（推荐 —— 无需任何凭据）
+
+```bash
+dsh plugin --profile web add @steven-stack-s/dsh-memos-local
+```
+
+`@steven-stack-s/dsh-memos-local` 已发布到公共 npm registry，任何人都可匿名安装：
+不需要 token、不需要配置 `.npmrc`、不需要 GitHub 账号。
+
+### 从 GitHub Packages 安装（需要 token）
+
+GitHub Packages 同步了同一版本，但它的 npm registry **即使对 public 包也要求认证**
+（这是 GitHub 的既定行为，不是配置错误）。每位用户使用**自己的** token
+（任意 GitHub 账号，`read:packages` 权限）：
 
 ```bash
 # .npmrc —— 把 @steven-stack-s 作用域指向 GitHub Packages
 echo '@steven-stack-s:registry=https://npm.pkg.github.com' >> ~/.npmrc
-echo '//npm.pkg.github.com/:_authToken=<你的_GITHUB_TOKEN>' >> ~/.npmrc
+echo '//npm.pkg.github.com/:_authToken=<你自己的_GITHUB_TOKEN>' >> ~/.npmrc
 
 dsh plugin --profile web add @steven-stack-s/dsh-memos-local
 ```
 
-### 从 git tag 安装（不走 registry，国内网络可用）
+### 从 git tag 安装（完全不走 registry）
 
-仓库已包含构建产物（`dist/`、`viewer/dist/`），因此从 git 安装无需构建步骤：
+仓库已包含构建产物（`dist/`、`viewer/dist/`），因此从 git 安装无需构建步骤；
+适合 registry 被网络限制的场景：
 
 ```bash
 dsh plugin --profile web add \
@@ -37,7 +51,8 @@ dsh plugin --profile web add \
 上游发布 `2.0.19`，我们就发布 `2.0.19`；且 `package.json.version` 必须等于 git tag
 去掉 `v` 前缀后的值（`v2.0.19` ⇄ `"version": "2.0.19"`）。
 
-发布 workflow 强制校验这一点——tag 与 `package.json.version` 不一致会导致构建失败。升级步骤：
+两个发布 workflow（`publish-npmjs.yml`、`publish-github-packages.yml`）都会强制校验这一点——
+tag 与 `package.json.version` 不一致会导致构建失败。升级步骤：
 
 ```bash
 # 1. 把 package.json 的 version 设为所同步的上游版本
@@ -46,7 +61,7 @@ npm run build:package
 # 3. 提交、打 tag、推送
 git commit -am 'chore: sync upstream <版本>'
 git tag -a v<版本> -m 'v<版本>'
-git push origin main --tags   # 触发 publish-npm.yml
+git push origin main --tags   # 触发两个发布 workflow
 ```
 
 ## 与上游的关系（subtree 同步）

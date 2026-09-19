@@ -1,20 +1,22 @@
 # ============================================================================
-# publish-npm.yml — 把插件发布到 GitHub Packages (npm registry)
+# publish-npmjs.yml — 把插件发布到 npmjs.org (公共 npm registry)
 #
-# 文档: https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry
+# 这是**主发布目标**: npmjs 上的 public 包人人可匿名安装, 无需任何 token。
+#   npm install @steven-stack-s/dsh-memos-local
+#   dsh plugin --profile web add @steven-stack-s/dsh-memos-local
 #
 # 触发方式:
 #   - push tag  v*        → 用该 tag 发布对应版本
 #   - workflow_dispatch   → 手动发布当前 main 的版本
 #
-# 认证: 使用内置 GITHUB_TOKEN(需要 packages: write 权限), 无需额外 PAT。
-# 包名必须是作用域包名(@steven-stack-s/dsh-memos-local) —— GitHub Packages
-# 只接受 scoped 包名。
+# 认证: 需要仓库 Secret `NPM_TOKEN` —— 在 npmjs.com 生成的 Automation token
+#       (Access Tokens → Generate New Token → Classic → Automation)。
+#       Automation 类型会绕过 2FA, 适合 CI。
 #
 # 版本策略: 与上游 @memtensor/memos-local-plugin 严格一致(见 README)。
 # 发布前校验 tag 与 package.json 的 version 是否一致, 不一致直接失败。
 # ============================================================================
-name: publish-npm
+name: publish-npmjs
 
 on:
   push:
@@ -23,7 +25,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: publish-npm
+  group: publish-npmjs
   cancel-in-progress: false
 
 jobs:
@@ -31,17 +33,15 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node (GitHub Packages registry)
+      - name: Setup Node (npmjs registry)
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://npm.pkg.github.com'
-          scope: '@steven-stack-s'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Verify tag matches package.json version
         if: startsWith(github.ref, 'refs/tags/')
@@ -55,18 +55,27 @@ jobs:
             exit 1
           fi
 
+      - name: Guard against missing NPM_TOKEN
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::缺少 NPM_TOKEN secret; 请在仓库 Settings → Secrets and variables → Actions 添加"
+            exit 1
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
       - name: Build (prepack also runs this)
         run: npm run build:package
 
-      - name: Publish to GitHub Packages
-        run: npm publish
+      - name: Publish to npmjs
+        run: npm publish --registry https://registry.npmjs.org --access public
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Summary
         run: |
           echo "published: $(node -p "require('./package.json').name + '@' + require('./package.json').version")"
-          echo "view: https://github.com/steven-stack-s?tab=packages"
+          echo "view: https://www.npmjs.com/package/@steven-stack-s/dsh-memos-local"
