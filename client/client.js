@@ -39,7 +39,6 @@ window.__ModuleLoader__.load({
       authSwitchOff: '开启',
       authBusy: '处理中…',
       authErr: '操作失败，请稍后重试',
-      tabGeneral: '概览',
       tabImport: '导入 / 导出',
       tabSettings: '设置',
       tabHelp: '帮助',
@@ -61,7 +60,6 @@ window.__ModuleLoader__.load({
       authSwitchOff: 'Enable',
       authBusy: 'Processing…',
       authErr: 'Operation failed, please retry',
-      tabGeneral: 'Overview',
       tabImport: 'Import / Export',
       tabSettings: 'Settings',
       tabHelp: 'Help',
@@ -118,7 +116,7 @@ window.__ModuleLoader__.load({
       const [authBusy, setAuthBusy] = React.useState(false);
       const [authErr, setAuthErr] = React.useState(false);
       // Sub-tab selector: the general card plus three embedded viewer pages.
-      const [tab, setTab] = React.useState('general');
+      const [tab, setTab] = React.useState('import');
       React.useEffect(() => {
         if (!ctx || !ctx.locale || typeof ctx.locale.subscribe !== 'function') return;
         const unsubscribe = ctx.locale.subscribe(() => setLang(getActiveLang()));
@@ -177,7 +175,6 @@ window.__ModuleLoader__.load({
         gap: 12, padding: '6px 0',
       };
       const tabs = [
-        { id: 'general', label: t.tabGeneral },
         { id: 'import', label: t.tabImport },
         { id: 'settings', label: t.tabSettings },
         { id: 'help', label: t.tabHelp },
@@ -200,7 +197,7 @@ window.__ModuleLoader__.load({
       // pages keep their own locale + auth handling and full functionality.
       const frame = (hash, title) => h('iframe', {
         key: tab + hash,
-        src: '/memos/' + langQuery + '#' + hash,
+        src: '/memos/' + langQuery + '&embed=1#' + hash,
         title,
         style: {
           width: '100%', height: '68vh', minHeight: 420,
@@ -214,17 +211,17 @@ window.__ModuleLoader__.load({
         h('div', { style: rowStyle }, authInfo, toggle),
       );
       const body =
-        tab === 'import' ? frame('/import', t.tabImport) :
         tab === 'settings' ? frame('/settings', t.tabSettings) :
-        tab === 'help' ? frame('/help', t.tabHelp) : null;
+        tab === 'help' ? frame('/help', t.tabHelp) :
+        frame('/import', t.tabImport);
       return h('div', { style: { padding: '8px 0', fontSize: 13, lineHeight: 1.6 } },
         header,
         tabBar,
         body,
-        tab === 'general' ? h('a', {
+        h('a', {
           href: '/memos/', target: '_blank', rel: 'noreferrer',
           style: { color: 'inherit', textDecoration: 'underline', display: 'inline-block', marginTop: 8 },
-        }, t.open) : null,
+        }, t.open),
       );
     }
     // Shared state: the apply(ctx) that owns DSH locale access, and a ref

@@ -15,6 +15,7 @@ import { AuthGate } from "./AuthGate";
 import { RestartOverlay } from "./RestartOverlay";
 import { useEffect } from "preact/hooks";
 import { startHealthPolling } from "../stores/health";
+import { embedded } from "../stores/router";
 
 export function App() {
   useEffect(() => {
@@ -29,6 +30,21 @@ export function App() {
       },
     );
   }, []);
+
+  // Embedded mode: DSH Settings hosts this page in an iframe, so we render
+  // only the routed view. The standalone viewer's chrome (topbar, model
+  // banner, sidebar) is dropped to avoid nesting a full viewer inside the
+  // DSH shell.
+  if (embedded) {
+    return (
+      <AuthGate>
+        <main class="main main--embedded">
+          <ContentRouter />
+        </main>
+        <RestartOverlay />
+      </AuthGate>
+    );
+  }
 
   return (
     <AuthGate>

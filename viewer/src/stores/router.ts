@@ -46,3 +46,25 @@ export function navigate(path: string, params?: Record<string, string>): void {
   }
   window.location.hash = hash;
 }
+
+/**
+ * Embedded mode — set by the DSH Settings shell when it hosts a viewer
+ * page inside an iframe (e.g. `/memos/?lang=zh&embed=1#/settings`).
+ *
+ * In this mode the app renders only the routed view: the topbar, model
+ * banner and sidebar (which belong to the standalone viewer) are
+ * omitted, so the page looks like native DSH settings content instead
+ * of a whole viewer nested inside another shell.
+ *
+ * Read once at module load — the DSH shell never flips this at runtime;
+ * it sets the parameter when it creates the iframe.
+ */
+export const embedded: boolean = (() => {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const v = q.get("embed");
+    return v === "1" || v === "true";
+  } catch {
+    return false;
+  }
+})();

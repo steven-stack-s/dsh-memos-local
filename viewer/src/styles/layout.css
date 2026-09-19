@@ -493,6 +493,20 @@ body {
   }
 }
 
+/*
+ * Embedded mode — the page is hosted in an iframe by the DSH Settings
+ * shell (see App.tsx + stores/router.ts). There is no sidebar/topbar
+ * grid here, so the main column takes the full viewport width and the
+ * outer padding is trimmed to sit flush inside the host card.
+ */
+.main--embedded {
+  grid-area: auto;
+  width: 100%;
+  min-height: 100vh;
+  padding: var(--sp-4) var(--sp-5) var(--sp-8);
+  box-sizing: border-box;
+}
+
 .view-header {
   display: flex;
   align-items: flex-start;
