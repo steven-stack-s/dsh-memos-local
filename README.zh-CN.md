@@ -61,32 +61,63 @@ dsh plugin --profile web add \
 **版本号由两部分组成：上游基线 + 本地修订号。**
 
 ```
-<上游版本> + dsh.<本地修订号>
-   2.0.19   +     dsh.1
+<上游版本> - dsh.<本地修订号>
+   2.0.19   -     dsh.1
 ```
 
 - `2.0.19` 是本 fork 所同步的上游 `@memtensor/memos-local-plugin` 版本，
   表示*算法与上游哪一版对齐*。
-- `+dsh.N` 是**本 fork 自己的修订计数器**，在同一上游基线内每发一次
-  fork 专属改动就递增（`2.0.19+dsh.1`、`2.0.19+dsh.2`……）；
-  切换到新的上游基线时重置为 `dsh.1`（`2.0.20+dsh.1`）。
+- `-dsh.N` 是**本 fork 自己的修订计数器**，在同一上游基线内每发一次
+  fork 专属改动就递增（`2.0.19-dsh.1`、`2.0.19-dsh.2`……）；
+  切换到新的上游基线时重置为 `dsh.1`（`2.0.20-dsh.1`）。
 
-`+` 段是 semver 的 **build metadata**：它是版本字符串的一部分、也参与 registry
-的唯一性校验，但在**比较优先级时被忽略**。这是刻意选择的——`2.0.19+dsh.1`
-仍然满足 `^2.0.19` 范围，使用者能正常解析到它。而形如 `2.0.19-dsh.1` 的
-prerelease 写法会排在 `2.0.19` **之下**、掉出范围匹配，不要使用。
+### 为什么用 `-dsh.N` 而不是 `+dsh.N`
+
+`-dsh.N` 是 semver 的 **prerelease** 语法。prerelease 排在正式版**之下**：
+`2.0.19-dsh.1 < 2.0.19`。这是实打实的代价，见下方「注意：范围匹配」。
+
+看起来更优的选择是 build metadata（`2.0.19+dsh.1`）——它在优先级比较中被忽略，
+所以 `2.0.19+dsh.1` 仍然满足 `^2.0.19`。**但它不可用。** 该方案曾实现并对真实
+registry 实测，结果证明 npm 会在发布路径上剥掉 `+` 段：
+
+```
+package.json          "version": "2.0.19+dsh.1"
+npm publish 实际产出   npm notice version: 2.0.19
+                      npm notice filename: ...-2.0.19.tgz
+registry 收到的 PUT    https://registry.npmjs.org/@steven-stack-s%2fdsh-memos-local
+                      -> 400 Cannot publish over previously published version "2.0.19"
+```
+
+我们要发布的版本号，和 npm 实际发布的版本号不是同一个，因此 build metadata
+无法用来把 fork 发布与上游版本号区分开。prerelease 语法能完整穿过发布路径，
+这是这里选用它的唯一原因。
 
 ### tag ⇄ 版本号映射
 
-git ref 无法无歧义地承载 `+`，因此 tag 里用 `-` 代替版本号中的 `+`：
+git tag 就是 `v` + 版本号本身，不做任何变换：
 
 | `package.json` 版本 | git tag |
 | --- | --- |
-| `2.0.19+dsh.1` | `v2.0.19-dsh.1` |
-| `2.0.19+dsh.2` | `v2.0.19-dsh.2` |
-| `2.0.20+dsh.1` | `v2.0.20-dsh.1` |
+| `2.0.19-dsh.1` | `v2.0.19-dsh.1` |
+| `2.0.19-dsh.2` | `v2.0.19-dsh.2` |
+| `2.0.20-dsh.1` | `v2.0.20-dsh.1` |
 
-两个发布 workflow 都会把 tag 归一化回 `+` 形式，不一致则直接失败。
+两个发布 workflow 都会校验 tag 与 `package.json.version` 是否一致，不一致直接失败。
+
+### 注意：范围匹配
+
+因为 prerelease 排在正式版之下，**`2.0.19-dsh.1` 不满足 `^2.0.19`**——
+npm 的 semver 会把 prerelease 排除在范围匹配之外，除非范围自身就点明了同一
+元组上的 prerelease。后果：
+
+- 写成 `"^2.0.19"` 的依赖**不会**解析到 `2.0.19-dsh.1`。
+- 请按**精确版本**安装（`2.0.19-dsh.1`），或走 dist-tag（`latest` 总是指向
+  最新已发布版本，不受范围规则影响），或直接用 `dsh plugin add`——它按名字
+  直接安装指定包。
+
+对本 fork 的分发方式来说这是可接受的：使用者是**按包名安装**，而不是把它作为
+caret 范围的依赖引入。若将来确实需要能被范围匹配到，就发一个非 prerelease 的
+版本号，或让使用方依赖 `latest`。
 
 ### 为什么需要本地修订号
 
@@ -99,25 +130,25 @@ git ref 无法无歧义地承载 `+`，因此 tag 里用 `-` 代替版本号中�
 ```
 
 所以复用上游版本号会**永久消耗**它。若严格跟随上游版本号，这个 fork 迟早会
-无号可发。`+dsh.N` 序列让每次 fork 发布都有一个全新的、从未被占用的版本号。
+无号可发。`-dsh.N` 序列让每次 fork 发布都有一个全新的、从未被占用的版本号。
 
 ### 升级步骤
 
 ```bash
 # 1. 改 package.json 的 version
-#      同一基线上的 fork 改动:  2.0.19+dsh.1 -> 2.0.19+dsh.2
-#      同步到新的上游版本:       2.0.20+dsh.1
+#      同一基线上的 fork 改动:  2.0.19-dsh.1 -> 2.0.19-dsh.2
+#      同步到新的上游版本:       2.0.20-dsh.1
 node -e "
   const fs = require('fs');
   const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-  p.version = '2.0.19+dsh.2';            // <-- 改这里
+  p.version = '2.0.19-dsh.2';            // <-- 改这里
   fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
 "
 # 2. 刷新入库的构建产物
 npm run build:package
-# 3. 提交、打 tag（tag 用 '-' 代替版本号里的 '+'）
-git commit -am 'chore(release): v2.0.19+dsh.2'
-git tag -a v2.0.19-dsh.2 -m 'v2.0.19+dsh.2'
+# 3. 提交、打 tag
+git commit -am 'chore(release): v2.0.19-dsh.2'
+git tag -a v2.0.19-dsh.2 -m 'v2.0.19-dsh.2'
 git push origin main --tags
 ```
 
@@ -221,7 +252,7 @@ curl -fsSL https://raw.githubusercontent.com/MemTensor/MemOS/main/apps/memos-loc
 
 > 这里的 `--version 2.0.19` 指的是**上游** `@memtensor/memos-local-plugin` 的版本，
 > 不是本 fork 的版本。该安装器位于上游仓库、安装的是上游包；本 fork 发布的是
-> 自己的 `@steven-stack-s/dsh-memos-local`，版本形如 `<上游版本>+dsh.<n>`
+> 自己的 `@steven-stack-s/dsh-memos-local`，版本形如 `<上游版本>-dsh.<n>`
 > （见[版本策略](#版本策略)）。
 
 如果 `pnpm` 不在 `PATH` 上，它会为该次安装准备一个隔离的 `pnpm@11.7.0`，

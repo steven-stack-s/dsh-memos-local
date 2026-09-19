@@ -3,14 +3,14 @@
 Notable changes to `dsh-memos-local`. Maintained by hand; for the full
 per-commit history use `git log` or the GitHub releases page.
 
-## [v2.0.19+dsh.1]
+## [v2.0.19-dsh.1]
 
 ### Versioning — the fork now carries its own revision series
 
 **Breaking change to the version policy.** Until now the version tracked
 upstream `@memtensor/memos-local-plugin` exactly; it is now
-`<upstream-version>+dsh.<local-revision>` (e.g. `2.0.19+dsh.1`), and git tags
-use `-` where the version uses `+` (`v2.0.19-dsh.1`).
+`<upstream-version>-dsh.<local-revision>` (e.g. `2.0.19-dsh.1`), and the git tag
+is `v` plus that version (`v2.0.19-dsh.1`).
 
 Rationale: **npm version numbers are permanent.** When a version is
 unpublished, the registry deletes the artifacts but keeps a tombstone in the
@@ -20,10 +20,26 @@ packument's `time` table, and rejects any later publish of that number with
 those numbers — a fork that mirrors upstream numbers runs out of publishable
 versions. See README "Version policy" for the full rules.
 
-`+dsh.N` is semver build metadata: it participates in the registry's
-uniqueness check but is ignored in precedence comparisons, so `2.0.19+dsh.1`
-still satisfies a `^2.0.19` range. A prerelease form (`2.0.19-dsh.1`) was
-rejected because it sorts below `2.0.19` and falls out of range matches.
+**`-dsh.N` is prerelease syntax, and that is deliberate.** The first
+implementation used build metadata (`2.0.19+dsh.1`) precisely because it is
+ignored in precedence comparisons and therefore still satisfies `^2.0.19`. That
+implementation was exercised against the real registry and **failed**: npm
+strips the `+` segment on the publish path, so `npm publish` built
+`...-2.0.19.tgz`, PUT version `2.0.19`, and hit the tombstone:
+
+```
+npm notice version: 2.0.19
+npm notice filename: steven-stack-s-dsh-memos-local-2.0.19.tgz
+npm error 400 Bad Request - PUT https://registry.npmjs.org/@steven-stack-s%2fdsh-memos-local
+npm error - Cannot publish over previously published version "2.0.19".
+```
+
+Build metadata cannot distinguish fork releases from the upstream number, so
+prerelease syntax is used instead. It survives the publish path intact.
+
+**Caveat:** a prerelease sorts below its release, so `2.0.19-dsh.1` does *not*
+satisfy `^2.0.19`. Install by exact version, by dist-tag (`latest`), or via
+`dsh plugin add` — not through a caret range. Documented in the README.
 
 ### Publishing safety
 
@@ -40,8 +56,7 @@ rejected because it sorts below `2.0.19` and falls out of range matches.
   `fetch` rather than `curl` and fails closed: an initial `curl ... || echo '{}'`
   version silently passed every version when `curl` was absent, which is worse
   than no guard at all.
-- Both workflows normalize the `-` in the tag back to `+` when comparing
-  against `package.json.version`.
+- Both workflows verify the tag equals `v` + `package.json.version`.
 
 ## [v2.0.19]
 

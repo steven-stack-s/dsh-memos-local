@@ -65,37 +65,69 @@ dsh plugin --profile web add \
 **A version has two parts: the upstream baseline, plus a local revision.**
 
 ```
-<upstream-version> + dsh.<local-revision>
-      2.0.19       +     dsh.1
+<upstream-version> - dsh.<local-revision>
+      2.0.19       -     dsh.1
 ```
 
 - `2.0.19` is the upstream `@memtensor/memos-local-plugin` release this fork is
   synced to. It says *which upstream code the algorithms match*.
-- `+dsh.N` is **this fork's own revision counter** within that baseline. It
-  increments on every fork-only change we publish (`2.0.19+dsh.1`,
-  `2.0.19+dsh.2`, …), and resets to `dsh.1` when we move to a new upstream
-  baseline (`2.0.20+dsh.1`).
+- `-dsh.N` is **this fork's own revision counter** within that baseline. It
+  increments on every fork-only change we publish (`2.0.19-dsh.1`,
+  `2.0.19-dsh.2`, …), and resets to `dsh.1` when we move to a new upstream
+  baseline (`2.0.20-dsh.1`).
 
-The `+` segment is semver **build metadata**: it is part of the version string
-and part of the registry's uniqueness check, but it is *ignored* when versions
-are compared for precedence. That is deliberate — `2.0.19+dsh.1` still
-satisfies a `^2.0.19` range, so consumers resolve it normally. A prerelease
-form such as `2.0.19-dsh.1` would sort *below* `2.0.19` and fall out of range
-matches; do not use it.
+### Why `-dsh.N` and not `+dsh.N`
+
+The `-dsh.N` segment is semver **prerelease** syntax. A prerelease sorts *below*
+its release: `2.0.19-dsh.1 < 2.0.19`. That is a real cost — see
+"Caveat: range matching" below.
+
+The obvious alternative, build metadata (`2.0.19+dsh.1`), looks strictly better
+on paper because build metadata is ignored in precedence comparisons, so
+`2.0.19+dsh.1` still satisfies `^2.0.19`. **It does not work.** It was
+implemented and tested against the real registry, and npm strips the `+`
+segment on the publish path:
+
+```
+package.json          "version": "2.0.19+dsh.1"
+npm publish produced  npm notice version: 2.0.19
+                      npm notice filename: ...-2.0.19.tgz
+registry PUT          https://registry.npmjs.org/@steven-stack-s%2fdsh-memos-local
+                      -> 400 Cannot publish over previously published version "2.0.19"
+```
+
+The version we asked to publish is not the version npm publishes, so build
+metadata cannot be used to distinguish fork releases from the upstream number.
+Prerelease syntax survives the publish path intact, which is why it is used
+here.
 
 ### Tag ⇄ version mapping
 
-git refs cannot carry `+` unambiguously, so tags use `-` where the version uses
-`+`:
+The git tag is `v` plus the version, unchanged:
 
 | `package.json` version | git tag |
 | --- | --- |
-| `2.0.19+dsh.1` | `v2.0.19-dsh.1` |
-| `2.0.19+dsh.2` | `v2.0.19-dsh.2` |
-| `2.0.20+dsh.1` | `v2.0.20-dsh.1` |
+| `2.0.19-dsh.1` | `v2.0.19-dsh.1` |
+| `2.0.19-dsh.2` | `v2.0.19-dsh.2` |
+| `2.0.20-dsh.1` | `v2.0.20-dsh.1` |
 
-Both publish workflows normalize the tag back to the `+` form and fail if it
-does not match `package.json.version`.
+Both publish workflows fail if the tag does not match `package.json.version`.
+
+### Caveat: range matching
+
+Because prereleases sort below the release, **`2.0.19-dsh.1` does not satisfy
+`^2.0.19`** — npm's semver excludes prereleases from range matches unless the
+range itself names a prerelease on the same tuple. Consequences:
+
+- A dependency written as `"^2.0.19"` will **not** resolve to `2.0.19-dsh.1`.
+- Install it by exact version (`2.0.19-dsh.1`), by dist-tag (`latest`, which
+  resolves to the newest published version regardless of range rules), or via
+  `dsh plugin add`, which installs the named package directly.
+
+This is acceptable for how this fork is distributed — users install the package
+by name, not by depending on it through a caret range. If a range-matched
+release ever becomes necessary, either publish a non-prerelease version or have
+consumers depend on `latest`.
 
 ### Why a local revision series exists
 
@@ -105,26 +137,26 @@ number stays burned — the registry keeps a tombstone in the packument's `time`
 table and refuses any later publish of that number with
 `400 Cannot publish over previously published version`. Re-using an upstream
 number therefore permanently consumes it, and a fork that tracks upstream
-exactly will eventually have nothing left to publish. The `+dsh.N` series gives
+exactly will eventually have nothing left to publish. The `-dsh.N` series gives
 every fork release a fresh, never-used version string.
 
 ### Bumping
 
 ```bash
 # 1. set the version in package.json
-#      fork-only change on the same baseline:  2.0.19+dsh.1 -> 2.0.19+dsh.2
-#      synced to a new upstream release:       2.0.20+dsh.1
+#      fork-only change on the same baseline:  2.0.19-dsh.1 -> 2.0.19-dsh.2
+#      synced to a new upstream release:       2.0.20-dsh.1
 node -e "
   const fs = require('fs');
   const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-  p.version = '2.0.19+dsh.2';            // <-- edit me
+  p.version = '2.0.19-dsh.2';            // <-- edit me
   fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
 "
 # 2. refresh the in-repo build output
 npm run build:package
-# 3. commit and tag (tag uses '-' for the '+' in the version)
-git commit -am 'chore(release): v2.0.19+dsh.2'
-git tag -a v2.0.19-dsh.2 -m 'v2.0.19+dsh.2'
+# 3. commit and tag
+git commit -am 'chore(release): v2.0.19-dsh.2'
+git tag -a v2.0.19-dsh.2 -m 'v2.0.19-dsh.2'
 git push origin main --tags
 ```
 
@@ -239,7 +271,7 @@ curl -fsSL https://raw.githubusercontent.com/MemTensor/MemOS/main/apps/memos-loc
 > `--version 2.0.19` here is the **upstream** `@memtensor/memos-local-plugin`
 > release, not this fork's version. The installer lives in the upstream repo and
 > installs the upstream package; this fork publishes its own
-> `@steven-stack-s/dsh-memos-local` at `<upstream>+dsh.<n>` (see
+> `@steven-stack-s/dsh-memos-local` at `<upstream>-dsh.<n>` (see
 > [Version policy](#version-policy)).
 
 The installer delegates package ownership and bundle reconciliation to

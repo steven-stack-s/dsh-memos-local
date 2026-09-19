@@ -15,9 +15,15 @@
 #       注意: 账号开了 2FA 时, Classic 的 Publish 类型 token 发布会 403;
 #       必须用带 bypass 2FA 的 granular token(或改用 Trusted Publishing/OIDC)。
 #
-# 版本策略: `<上游版本>+dsh.<本地修订号>`, 例如 2.0.19+dsh.1 —— 见 README
-#           "Version policy"。tag 用 `-` 代替 `+` (v2.0.19-dsh.1), 因为 git ref
-#           里 `+` 有歧义; 本 workflow 负责把 tag 归一化回 package.json 的形式。
+# 版本策略: `<上游版本>-dsh.<本地修订号>`, 例如 2.0.19-dsh.1 —— 见 README
+#           "Version policy"。tag 即 `v<版本>` (v2.0.19-dsh.1)。
+#           注意: 这里刻意使用 semver **prerelease** 段 (`-dsh.N`) 而不是 build
+#           metadata (`+dsh.N`)。实测证实 npm 在打包/发布路径上会剥掉 `+` 段:
+#           package.json 写 `2.0.19+dsh.1`, 而 `npm publish` 实际构造的 tarball 与
+#           PUT 的版本都是 `2.0.19`, 于是撞上已烧毁的版本号并返回
+#           400 Cannot publish over previously published version。
+#           代价: prerelease 不满足 `^2.0.19` 范围 (语义上低于 2.0.19), 使用者应显式
+#           安装该版本或依赖 `latest` dist-tag, 而非依赖 caret 范围。
 #
 # 防呆: 发布前查询 registry, 若该版本号已被占用则 fail fast —— npm 的 unpublish
 #       只删除产物, 版本号永久作废 (time.unpublished 会留下墓碑), 盲发必然撞 400。
@@ -59,17 +65,11 @@ jobs:
         run: |
           set -eu
           TAG="${GITHUB_REF_NAME}"
-          PKG="v$(node -p "require('./package.json').version")"
-          # tag 用 `-` 表示 semver 的 `+` build metadata 段:
-          #   tag v2.0.19-dsh.1  ⇄  package.json "2.0.19+dsh.1"
-          EXPECTED="$(node -p "
-            const v = require('./package.json').version;
-            'v' + v.replace('+', '-');
-          ")"
-          echo "tag=$TAG pkg=$PKG expected_tag=$EXPECTED"
+          EXPECTED="v$(node -p "require('./package.json').version")"
+          echo "tag=$TAG expected_tag=$EXPECTED"
           if [ "$TAG" != "$EXPECTED" ]; then
             echo "::error::tag $TAG 与 package.json 版本不匹配 (期望 $EXPECTED)"
-            echo "::error::约定: package.json 用 '+' (2.0.19+dsh.1), git tag 用 '-' (v2.0.19-dsh.1)"
+            echo "::error::版本形如 <上游版本>-dsh.<n>, tag 即 v<版本> (例如 2.0.19-dsh.1 ⇄ v2.0.19-dsh.1)"
             exit 1
           fi
 
@@ -110,7 +110,7 @@ jobs:
             if (time[want]) {
               const isUnpub = unpublished.includes(want);
               console.error('::error::版本 ' + want + ' 已被占用' + (isUnpub ? ' (曾发布后被 unpublish, 墓碑仍在 time 表中)' : ''));
-              console.error('::error::npm 的版本号一经使用即永久作废, 请递增 +dsh.N 或切换到新的上游基线');
+              console.error('::error::npm 的版本号一经使用即永久作废, 请递增 -dsh.N 或切换到新的上游基线');
               process.exit(1);
             }
             console.log('OK: ' + want + ' 未被使用, 可以发布');

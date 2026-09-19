@@ -12,19 +12,21 @@
 
 The behaviour below is written for the **old version policy**, where the local
 version tracked upstream `@memtensor/memos-local-plugin` exactly. Under the
-current policy the running version is `<upstream>+dsh.<n>` (e.g.
-`2.0.19+dsh.1`), and this comparison would be wrong in two ways:
+current policy the running version is `<upstream>-dsh.<n>` (e.g.
+`2.0.19-dsh.1`), and this comparison would be wrong:
 
 1. **It compares against the wrong package.** The plugin now publishes as
    `@steven-stack-s/dsh-memos-local`, not `@memtensor/memos-local-plugin`.
    Checking upstream would report an update that does not exist for this fork.
-2. **It would misread our own local revisions.** A naive string/semver
-   comparison treats `2.0.19+dsh.1` as equal to `2.0.19` (build metadata is
-   ignored in precedence), so moving from `+dsh.1` to `+dsh.2` would never be
-   detected. Local revisions must be compared on the full string.
+2. **It would misread our own local revisions.** `semver` treats
+   `2.0.19-dsh.1` as *less than* `2.0.19` (prerelease sorts below its release),
+   so a naive "is latest newer than running?" check against upstream would
+   always look wrong. Compare against our own package's `latest` dist-tag, and
+   be aware that `latest` always points at the newest published version, so it
+   is a valid target for this comparison.
 
-Fix both before shipping: fetch our own package, and compare the full version
-string including the `+dsh.N` segment.
+Fix both before shipping: fetch our own package's `latest`, and compare the
+full version string including the `-dsh.N` segment.
 
 ## Behaviour (as originally designed)
 
