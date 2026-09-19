@@ -1,7 +1,16 @@
 node_modules/
-dist/
-viewer/dist/
 coverage/
+
+# Build artifacts ARE committed: the plugin is distributed via
+# `dsh plugin add github:steven-stack-s/dsh-memos-local`, and a git
+# install runs no build step (no `prepare`, and `postinstall` only
+# prints a notice). Shipping dist/ + viewer/dist/ is what makes the
+# package runnable straight from the repository, mirroring how
+# dsh-power-button / dsh-github-workbench commit their `lib/`.
+# Source maps are excluded — they are dev-only and dominate the size.
+dist/**/*.map
+viewer/dist/**/*.map
+dist/**/*.tsbuildinfo
 
 # Local builds & artifacts
 *.tgz

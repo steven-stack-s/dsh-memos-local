@@ -1,0 +1,220 @@
+/**
+ * Wires the skill module to the upstream event buses.
+ *
+ * Upstream triggers (all debounced via `queueMicrotask` so they never block
+ * the emitter):
+ *
+ *   - `l2.policy.induced`        → `runSkill({ trigger, policyId })`
+ *   - `l2.policy.status_changed` → `runSkill({ trigger, policyId })` when
+ *                                  the new status is `active`
+ *   - `reward.updated`           → `runSkill({ trigger: "reward.updated" })`
+ *                                  — evaluates every policy referenced by
+ *                                  the updated episode. Also drives the η
+ *                                  drift adjustment on existing skills.
+ *
+ * The handle returns `runOnce` for manual runs (used by the CLI / viewer
+ * rebuild button) and `applyFeedback` for explicit skill feedback.
+ */
+import { rootLogger } from "../logger/index.js";
+import { applySkillFeedback, runSkill, } from "./skill.js";
+import { shouldPromoteCandidate } from "./lifecycle.js";
+import { now as nowMs } from "../time.js";
+import { IDLE_ARCHIVE_BATCH_LIMIT } from "../storage/repos/skills.js";
+/** Bound one lifecycle pass to ten repository-sized archival batches. */
+const IDLE_ARCHIVE_MAX_BATCHES_PER_TICK = 10;
+function yieldToEventLoop() {
+    return new Promise((resolve) => setImmediate(resolve));
+}
+export function attachSkillSubscriber(deps) {
+    const log = deps.log ?? rootLogger.child({ channel: "core.skill" });
+    const runDeps = {
+        repos: deps.repos,
+        embedder: deps.embedder,
+        llm: deps.llm,
+        log,
+        bus: deps.bus,
+        config: deps.config,
+    };
+    let inflight = null;
+    let queued = null;
+    async function drain() {
+        while (queued) {
+            const next = queued;
+            queued = null;
+            try {
+                await runSkill({ trigger: next.trigger, policyId: next.hint?.policyId, skillId: next.hint?.skillId }, runDeps);
+            }
+            catch (err) {
+                log.error("skill.run.failed", {
+                    trigger: next.trigger,
+                    err: err instanceof Error ? err.message : String(err),
+                });
+            }
+        }
+    }
+    function triggerRun(trigger, hint) {
+        queued = { trigger, hint };
+        if (inflight) {
+            log.debug("skill.run.queued", { trigger });
+            return;
+        }
+        const promise = drain().finally(() => {
+            if (inflight === promise)
+                inflight = null;
+        });
+        inflight = promise;
+    }
+    const offInduced = deps.l2Bus.on("l2.policy.induced", (evt) => {
+        if (evt.kind !== "l2.policy.induced")
+            return;
+        log.debug("trigger.l2.policy.induced", { policyId: evt.policyId });
+        triggerRun("l2.policy.induced", { policyId: evt.policyId });
+    });
+    const offStatus = deps.l2Bus.on("l2.policy.updated", (evt) => {
+        if (evt.kind !== "l2.policy.updated")
+            return;
+        if (evt.status !== "active")
+            return;
+        log.debug("trigger.l2.policy.updated", { policyId: evt.policyId, status: evt.status });
+        triggerRun("l2.policy.status_changed", { policyId: evt.policyId });
+    });
+    const offReward = deps.rewardBus.on("reward.updated", (evt) => {
+        if (evt.kind !== "reward.updated")
+            return;
+        log.debug("trigger.reward.updated", {
+            episodeId: evt.result.episodeId,
+        });
+        resolveTrialsForReward(evt);
+        triggerRun("reward.updated");
+    });
+    function dispose() {
+        offInduced();
+        offStatus();
+        offReward();
+        log.info("skill.subscriber.disposed");
+    }
+    async function runOnce(input) {
+        const trigger = input.trigger ?? "manual";
+        return runSkill({
+            trigger,
+            policyId: input.policyId,
+            skillId: input.skillId,
+        }, runDeps);
+    }
+    function applyFeedback(skillId, kind, magnitude) {
+        applySkillFeedback(skillId, kind, runDeps, magnitude);
+    }
+    function resolveTrialsForReward(evt) {
+        const rTask = evt.result.rHuman;
+        const outcome = rTask >= 0.5 ? "pass" :
+            rTask <= -0.5 ? "fail" :
+                "unknown";
+        const trials = deps.repos.skillTrials.listPendingForEpisode(evt.result.episodeId);
+        if (trials.length === 0)
+            return;
+        for (const trial of trials) {
+            const evidence = {
+                source: "reward.updated",
+                episodeId: evt.result.episodeId,
+                rTask,
+                threshold: { pass: 0.5, fail: -0.5 },
+                reason: outcome === "pass"
+                    ? "rTask >= 0.5"
+                    : outcome === "fail"
+                        ? "rTask <= -0.5"
+                        : "-0.5 < rTask < 0.5",
+            };
+            const changed = deps.repos.skillTrials.resolve(trial.id, outcome, evt.result.completedAt, evidence);
+            if (!changed)
+                continue;
+            if (outcome === "pass" || outcome === "fail") {
+                applySkillFeedback(trial.skillId, outcome === "pass" ? "trial.pass" : "trial.fail", runDeps);
+            }
+            log.info("skill.trial.resolved", {
+                trialId: trial.id,
+                skillId: trial.skillId,
+                episodeId: evt.result.episodeId,
+                outcome,
+                rTask,
+            });
+        }
+    }
+    async function flush() {
+        // Loop in case additional events arrive while we're draining.
+        while (inflight) {
+            await inflight;
+        }
+    }
+    /** Promote eligible candidates and archive stale low-η active skills. */
+    async function lifecycleTick() {
+        const at = nowMs();
+        const candidates = deps.repos.skills.list({ status: "candidate", limit: 500 });
+        for (const s of candidates) {
+            if (!shouldPromoteCandidate(s, deps.config))
+                continue;
+            deps.repos.skills.setStatus(s.id, "active", at);
+            log.info("skill.auto_promoted", { skillId: s.id, name: s.name, eta: s.eta });
+            deps.bus.emit({
+                kind: "skill.status.changed",
+                at,
+                skillId: s.id,
+                previous: "candidate",
+                next: "active",
+                transition: "promoted",
+            });
+        }
+        const cutoff = at - deps.config.idleArchiveMs;
+        let batchesProcessed = 0;
+        let archivedTotal = 0;
+        while (batchesProcessed < IDLE_ARCHIVE_MAX_BATCHES_PER_TICK) {
+            const archivedSkills = deps.repos.skills.archiveNextIdleBatch({
+                minEtaForRetrieval: deps.config.minEtaForRetrieval,
+                cutoff,
+                updatedAt: at,
+                limit: IDLE_ARCHIVE_BATCH_LIMIT,
+            });
+            batchesProcessed += 1;
+            const archivedThisBatch = archivedSkills.length;
+            archivedTotal += archivedThisBatch;
+            for (const s of archivedSkills) {
+                log.debug("skill.idle_archived", {
+                    skillId: s.id,
+                    name: s.name,
+                    eta: s.eta,
+                    lastUsedAt: s.lastUsedAt ?? null,
+                    idleArchiveMs: deps.config.idleArchiveMs,
+                });
+                deps.bus.emit({
+                    kind: "skill.status.changed",
+                    at,
+                    skillId: s.id,
+                    previous: "active",
+                    next: "archived",
+                    transition: "archived",
+                });
+            }
+            if (archivedThisBatch > 0) {
+                log.info("skill.idle_archive_batch", {
+                    batchCount: batchesProcessed,
+                    archivedCount: archivedThisBatch,
+                    cutoff,
+                    minEtaForRetrieval: deps.config.minEtaForRetrieval,
+                });
+            }
+            if (archivedThisBatch < IDLE_ARCHIVE_BATCH_LIMIT)
+                break;
+            if (batchesProcessed === IDLE_ARCHIVE_MAX_BATCHES_PER_TICK) {
+                log.warn("skill.idle_archive_batch_limit_reached", {
+                    batchCount: batchesProcessed,
+                    archivedCount: archivedTotal,
+                    batchSize: IDLE_ARCHIVE_BATCH_LIMIT,
+                });
+            }
+            else {
+                await yieldToEventLoop();
+            }
+        }
+    }
+    return { dispose, runOnce, applyFeedback, flush, lifecycleTick };
+}
+//# sourceMappingURL=subscriber.js.map

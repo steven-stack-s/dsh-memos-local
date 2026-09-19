@@ -1,0 +1,1376 @@
+/**
+ * `capture.ts` — the Phase 6 pipeline entry point.
+ *
+ * Orchestrates:
+ *     extract → normalize → reflect(+synth?) → alpha-score → embed → persist
+ *
+ * Called by `subscriber.ts` whenever `episode.finalized` fires, or
+ * directly by integration tests to run capture synchronously.
+ *
+ * Return contract: a fully populated `CaptureResult`. Failures inside
+ * one stage are captured as `warnings` and we still try to persist the
+ * partial rows — V7 treats missing α as α=0, which is already the SQL
+ * default, so a non-fatal capture run still yields reward-propagatable
+ * traces.
+ */
+import { ERROR_CODES, MemosError } from "../../agent-contract/errors.js";
+import { rootLogger } from "../logger/index.js";
+import { ids } from "../id.js";
+import { disabledScore, scoreReflection } from "./alpha-scorer.js";
+import { batchScoreReflections } from "./batch-scorer.js";
+import { embedSteps } from "./embedder.js";
+import { normalizeSteps } from "./normalizer.js";
+import { extractReflection } from "./reflection-extractor.js";
+import { synthesizeReflection } from "./reflection-synth.js";
+import { extractSteps } from "./step-extractor.js";
+import { createSummarizer } from "./summarizer.js";
+import { tagsForStep } from "./tagger.js";
+import { extractErrorSignatures } from "./error-signature.js";
+export function createCaptureRunner(deps) {
+    const log = rootLogger.child({ channel: "core.capture" });
+    const now = deps.now ?? Date.now;
+    const summarizer = createSummarizer({
+        llm: deps.llm ?? null,
+        log: log.child({ channel: "core.capture.summarizer" }),
+    });
+    function emit(evt) {
+        deps.bus.emit(evt);
+    }
+    /**
+     * Per-turn lite capture — see `CaptureRunner.runLite` for contract.
+     * Extracts new steps from the episode, summarises + embeds them,
+     * and inserts trace rows with `reflection=null` + `alpha=0`. The
+     * topic-end `runReflect` pass fills those in later.
+     */
+    async function runLite(input) {
+        const startedAt = now();
+        const warnings = [];
+        const llmCalls = newLlmCounters();
+        emit({
+            kind: "capture.started",
+            episodeId: input.episode.id,
+            sessionId: input.episode.sessionId,
+        });
+        // ─── Extract + dedup (skip steps we've already written this episode) ──
+        const extractStart = now();
+        const rawAll = extractSteps(input.episode);
+        // #2076: MUST use listDedupRowsForEpisode (uncapped, streaming, no
+        // BLOB projection). The paginated `list` path silently truncates to
+        // 500 rows, which breaks dedup once an episode grows past that and
+        // causes the tail to be re-inserted every cycle (bloating `traces`
+        // unboundedly + starving the vector scan). Using the narrow-column
+        // dedup projection here also keeps peak RSS proportional to scalar
+        // fields, not embedding footprint (open code review on #2077).
+        const existingDedupRows = deps.tracesRepo.listDedupRowsForEpisode(input.episode.id);
+        const seenTs = new Set(existingDedupRows.map((t) => t.ts));
+        // Reused later by persistRows so we don't scan the episode twice.
+        const seenSignatures = new Set(existingDedupRows.map(traceIdentitySignature));
+        const raw = rawAll.filter((s) => !seenTs.has(s.ts));
+        const extractMs = now() - extractStart;
+        log.debug("stage.extract.done", {
+            phase: "lite",
+            episodeId: input.episode.id,
+            steps: raw.length,
+            novel: raw.length,
+            skipped: rawAll.length - raw.length,
+            durationMs: extractMs,
+        });
+        const normStart = now();
+        const normalized = normalizeSteps(raw, deps.cfg);
+        const normalizeMs = now() - normStart;
+        if (normalized.length === 0) {
+            const result = emptyResult(input, startedAt, {
+                extract: extractMs,
+                normalize: normalizeMs,
+            }, llmCalls, warnings);
+            // No `capture.done` here — lite never triggers reward.
+            return result;
+        }
+        // Skip stage 3 entirely. Wrap each NormalizedStep into a
+        // ScoredStep with a placeholder reflection so the rest of the
+        // pipeline keeps the same shape.
+        const scored = normalized.map((s) => ({
+            ...s,
+            reflection: { text: null, alpha: 0, usable: false, source: "none" },
+        }));
+        // Summarise — needed for the viewer card line + retrieval embedding.
+        const summarizeStart = now();
+        const { summaries, summarizeMs } = await runSummarize(scored, summarizeStart, llmCalls, warnings, { episodeId: input.episode.id, phase: "lite" });
+        // Embed.
+        const { vecs, embedMs } = await runEmbed(scored, summaries, warnings);
+        // Persist as new rows. Reflection / α deliberately empty.
+        const persistStart = now();
+        const rows = buildRows(scored, summaries, vecs, input.episode);
+        const persisted = await persistRows(rows, input, warnings, {}, seenSignatures);
+        if (!persisted) {
+            // emit capture.failed handled inside persistRows on hard fail.
+            return finalResult(input, startedAt, [], scored.map(toCandidate(rows)), {
+                extract: extractMs,
+                normalize: normalizeMs,
+                reflect: 0,
+                alpha: 0,
+                summarize: summarizeMs,
+                embed: embedMs,
+                persist: now() - persistStart,
+            }, llmCalls, warnings);
+        }
+        const persistMs = now() - persistStart;
+        const result = finalResult(input, startedAt, rows.map((r) => r.id), buildTraceCandidates(scored, rows), {
+            extract: extractMs,
+            normalize: normalizeMs,
+            reflect: 0,
+            alpha: 0,
+            summarize: summarizeMs,
+            embed: embedMs,
+            persist: persistMs,
+        }, llmCalls, warnings);
+        log.info("capture.lite.done", {
+            episodeId: input.episode.id,
+            sessionId: input.episode.sessionId,
+            traces: result.traceIds.length,
+            llmCalls,
+            totalMs: result.completedAt - startedAt,
+            warnings: warnings.length,
+        });
+        // Emit `capture.lite.done` so the api_logs table gets a per-turn
+        // `memory_add` row. This is distinct from `capture.done` which
+        // triggers the reward / L2 / L3 chain and only fires at topic end.
+        emit({ kind: "capture.lite.done", result });
+        return result;
+    }
+    async function runLightweight(input) {
+        const startedAt = now();
+        const warnings = [];
+        const llmCalls = newLlmCounters();
+        emit({
+            kind: "capture.started",
+            episodeId: input.episode.id,
+            sessionId: input.episode.sessionId,
+        });
+        const extractStart = now();
+        const rawAll = extractSteps(input.episode);
+        // #2076 + #2077 OCR: uncapped, narrow-projection dedup read.
+        // See `runLite` for the full rationale — one scan, no BLOBs.
+        const existingDedupRows = deps.tracesRepo.listDedupRowsForEpisode(input.episode.id);
+        const seenTurnIds = new Set(existingDedupRows
+            .map((t) => t.turnId)
+            .filter((v) => typeof v === "number" && Number.isFinite(v)));
+        // Reused later by persistRows so we don't scan the episode twice.
+        const seenSignatures = new Set(existingDedupRows.map(traceIdentitySignature));
+        const rawByTurn = new Map();
+        for (const step of rawAll) {
+            const turnId = pickTurnId(step.meta, step.ts);
+            if (seenTurnIds.has(turnId))
+                continue;
+            const bucket = rawByTurn.get(turnId) ?? [];
+            bucket.push(step);
+            rawByTurn.set(turnId, bucket);
+        }
+        const raw = Array.from(rawByTurn.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(([turnId, steps]) => mergeTurnSteps(input.episode.id, turnId, steps));
+        const extractMs = now() - extractStart;
+        const normStart = now();
+        const normalized = normalizeSteps(raw, deps.cfg);
+        const normalizeMs = now() - normStart;
+        if (normalized.length === 0) {
+            return emptyResult(input, startedAt, {
+                extract: extractMs,
+                normalize: normalizeMs,
+            }, llmCalls, warnings);
+        }
+        const scored = normalized.map((s) => ({
+            ...s,
+            reflection: { text: null, alpha: 0, usable: false, source: "none" },
+        }));
+        const summarizeStart = now();
+        const { summaries, summarizeMs } = await runSummarize(scored, summarizeStart, llmCalls, warnings, { episodeId: input.episode.id, phase: "lightweight" });
+        const { vecs: summaryOnlyVecs, embedMs } = await runEmbed(scored, summaries, warnings, { summaryOnly: true });
+        const persistStart = now();
+        const rows = buildRows(scored, summaries, summaryOnlyVecs, input.episode, {
+            lightweightMemory: true,
+        });
+        const persisted = await persistRows(rows, input, warnings, {
+            skipActionVectorRetry: true,
+        }, seenSignatures);
+        if (!persisted) {
+            return finalResult(input, startedAt, [], scored.map(toCandidate(rows)), {
+                extract: extractMs,
+                normalize: normalizeMs,
+                reflect: 0,
+                alpha: 0,
+                summarize: summarizeMs,
+                embed: embedMs,
+                persist: now() - persistStart,
+            }, llmCalls, warnings);
+        }
+        const persistMs = now() - persistStart;
+        const result = finalResult(input, startedAt, rows.map((r) => r.id), buildTraceCandidates(scored, rows), {
+            extract: extractMs,
+            normalize: normalizeMs,
+            reflect: 0,
+            alpha: 0,
+            summarize: summarizeMs,
+            embed: embedMs,
+            persist: persistMs,
+        }, llmCalls, warnings);
+        log.info("capture.lightweight.done", {
+            episodeId: input.episode.id,
+            sessionId: input.episode.sessionId,
+            traces: result.traceIds.length,
+            llmCalls,
+            totalMs: result.completedAt - startedAt,
+            warnings: warnings.length,
+        });
+        emit({ kind: "capture.lite.done", result });
+        return result;
+    }
+    /**
+     * Topic-end reflect pass — see `CaptureRunner.runReflect` for contract.
+     * Reads every trace already written for this episode, batch-scores
+     * reflection + α across the full causal chain, and patches each
+     * trace row with the result. Then fires `capture.done` so the
+     * reward subscriber computes R_human + back-propagates V.
+     */
+    async function runReflect(input) {
+        const startedAt = now();
+        const warnings = [];
+        const llmCalls = newLlmCounters();
+        emit({
+            kind: "capture.started",
+            episodeId: input.episode.id,
+            sessionId: input.episode.sessionId,
+        });
+        // Re-derive normalized steps from the (now closed) episode so the
+        // batch scorer sees state/action/outcome in the exact same shape
+        // it would have seen during a per-step pass.
+        const extractStart = now();
+        const rawAll = extractSteps(input.episode);
+        const extractMs = now() - extractStart;
+        const normStart = now();
+        const normalized = normalizeSteps(rawAll, deps.cfg);
+        const normalizeMs = now() - normStart;
+        // Pair each normalized step with its already-persisted trace row.
+        // Matching by timestamp alone is not stable during startup recovery:
+        // recovered snapshots are rebuilt from trace rows and the extractor may
+        // shift duplicate tool timestamps. Use content signatures first, and in
+        // recovered replay allow a timing-insensitive tool signature fallback.
+        const existing = deps.tracesRepo.listAllForEpisode(input.episode.id);
+        const recoveredReplay = isRecoveredReplay(input.episode);
+        const matcher = createTraceMatcher(existing, { allowRelaxedToolTiming: recoveredReplay });
+        const matchedRows = normalized.map((s) => matcher.take(s));
+        // A recovered snapshot is reconstructed from the trace rows that we are
+        // about to patch. If it produces steps but none of those steps match any
+        // source row, continuing into orphan handling / reflection would replay
+        // an invalid snapshot, spend LLM calls, and finally emit capture.done
+        // with no usable trace ids. Fail before any of those side effects.
+        //
+        // Partial matches remain recoverable: their matching rows are patched
+        // and the unmatched tail follows the existing bounded-orphan policy.
+        if (recoveredReplay &&
+            normalized.length > 0 &&
+            matchedRows.every((row) => row === null)) {
+            const error = new MemosError(ERROR_CODES.CONFLICT, "recovered replay did not match any persisted trace rows", {
+                episodeId: input.episode.id,
+                normalizedSteps: normalized.length,
+                persistedTraces: existing.length,
+            });
+            emit({
+                kind: "capture.failed",
+                episodeId: input.episode.id,
+                sessionId: input.episode.sessionId,
+                stage: "match",
+                error: {
+                    code: ERROR_CODES.CONFLICT,
+                    message: error.message,
+                },
+            });
+            throw error;
+        }
+        const orphanEntries = normalized
+            .map((step, index) => ({ step, index }))
+            .filter(({ index }) => matchedRows[index] === null);
+        if (orphanEntries.length > 0) {
+            log.warn("reflect.orphan_steps", {
+                episodeId: input.episode.id,
+                count: orphanEntries.length,
+                action: recoveredReplay ? "skip_recovery_insert" : "fallback_insert",
+            });
+            const maxRecoveryOrphans = Math.max(0, Math.floor(deps.cfg.maxRecoveryOrphanInserts));
+            const insertableEntries = recoveredReplay
+                ? orphanEntries.slice(0, maxRecoveryOrphans)
+                : orphanEntries;
+            const skipped = orphanEntries.length - insertableEntries.length;
+            if (skipped > 0) {
+                warnings.push({
+                    stage: "persist",
+                    message: "skipped recovered orphan trace inserts to avoid replay duplicates",
+                    detail: {
+                        episodeId: input.episode.id,
+                        skipped,
+                        maxRecoveryOrphanInserts: maxRecoveryOrphans,
+                    },
+                });
+            }
+            // These steps never went through runLite (likely a test path or a
+            // dropped event). Insert them now with reflection=null so the
+            // batch pass below can patch them like the rest.
+            if (insertableEntries.length > 0) {
+                const orphan = insertableEntries.map(({ step }) => step);
+                const summStart = now();
+                const { summaries } = recoveredReplay
+                    ? {
+                        summaries: orphan.map(heuristicTraceSummary),
+                    }
+                    : await runSummarize(orphan.map((s) => ({
+                        ...s,
+                        reflection: { text: null, alpha: 0, usable: false, source: "none" },
+                    })), summStart, llmCalls, warnings, { episodeId: input.episode.id, phase: "reflect" });
+                const orphanScored = orphan.map((s) => ({
+                    ...s,
+                    reflection: { text: null, alpha: 0, usable: false, source: "none" },
+                }));
+                const { vecs } = await runEmbed(orphanScored, summaries, warnings);
+                const orphanRows = buildRows(orphanScored, summaries, vecs, input.episode);
+                await persistRows(orphanRows, input, warnings);
+                orphanRows.forEach((row, i) => {
+                    const entry = insertableEntries[i];
+                    if (entry)
+                        matchedRows[entry.index] = row;
+                });
+            }
+        }
+        if (normalized.length === 0) {
+            const result = emptyResult(input, startedAt, {
+                extract: extractMs,
+                normalize: normalizeMs,
+            }, llmCalls, warnings);
+            emit({ kind: "capture.done", result });
+            return result;
+        }
+        // Batch reflection + α across every step of the now-closed
+        // episode. Long episodes are chunk-batched at `batchThreshold`;
+        // failed chunks fall back to per-step scoring. The reflect pass uses
+        // `reflectLlm` (skill-evolver model when configured) for higher
+        // quality reflections; per-turn lite capture still uses `llm`.
+        const reflectStart = now();
+        const rLlm = deps.reflectLlm ?? deps.llm;
+        const scoringPlan = planScoring(deps.cfg, normalized.length, rLlm !== null);
+        const contextEnabled = contextModeFor(deps.cfg, scoringPlan, normalized.length);
+        const taskSummary = contextEnabled.includeTask
+            ? buildTaskReflectionSummary(input.episode, normalized, deps.cfg.taskContextMaxChars)
+            : null;
+        const downstreamByStep = contextEnabled.includeDownstream
+            ? buildDownstreamStepPreviews(normalized, deps.cfg)
+            : normalized.map(() => []);
+        log.info("capture.reflect.scoring.start", {
+            episodeId: input.episode.id,
+            sessionId: input.episode.sessionId,
+            steps: normalized.length,
+            mode: scoringPlan === "per_step" && contextEnabled.includeDownstream ? "per_step_downstream" : scoringPlan,
+            chunks: scoringPlan === "chunk_batch"
+                ? Math.ceil(normalized.length / Math.max(1, deps.cfg.batchThreshold))
+                : undefined,
+            reflectionContextMode: deps.cfg.reflectionContextMode,
+            downstreamPreview: contextEnabled.includeDownstream,
+            provider: rLlm?.provider ?? "none",
+            model: rLlm?.model ?? "none",
+            taskSummary: taskSummary ? taskSummary.slice(0, 240) : null,
+        });
+        let scored = [];
+        const reflectBudget = createReflectLlmBudget(deps.cfg.maxReflectLlmCalls, warnings, input.episode.id);
+        if (scoringPlan === "batch") {
+            scored = await runBatchScoring(normalized, rLlm, deps, warnings, llmCalls, input.episode.id, taskSummary, reflectBudget);
+        }
+        if (scoringPlan === "chunk_batch") {
+            scored = await runChunkedBatchScoring(normalized, rLlm, deps, warnings, llmCalls, input.episode.id, taskSummary, reflectBudget);
+        }
+        if (scoringPlan === "per_step" || scored.length === 0) {
+            scored = await runPerStepScoring(normalized, rLlm, deps, warnings, llmCalls, input.episode.id, buildReflectionContexts(normalized, taskSummary, downstreamByStep), reflectBudget);
+        }
+        const reflectMs = now() - reflectStart;
+        // Patch each existing trace with the freshly-computed reflection +
+        // α. Steps that lack a matching trace (shouldn't happen after the
+        // orphan-fallback above) are skipped with a warning.
+        const persistStart = now();
+        const patchedTraceIds = [];
+        for (let i = 0; i < scored.length; i++) {
+            const s = scored[i];
+            const row = matchedRows[i];
+            if (!row) {
+                warnings.push({
+                    stage: "persist",
+                    message: "reflect: no trace row for step signature; skipping",
+                    detail: { ts: s.ts, key: s.key },
+                });
+                continue;
+            }
+            try {
+                log.info("capture.reflect.trace.scored", {
+                    episodeId: input.episode.id,
+                    sessionId: input.episode.sessionId,
+                    traceId: row.id,
+                    stepKey: s.key,
+                    ts: s.ts,
+                    turnId: pickTurnId(s.meta, s.ts),
+                    alpha: s.reflection.alpha ?? 0,
+                    usable: s.reflection.usable,
+                    reason: s.reflection.reason ?? null,
+                    source: s.reflection.source,
+                    model: s.reflection.model ?? null,
+                    reflection: s.reflection.text,
+                });
+                deps.tracesRepo.updateReflection(row.id, {
+                    reflection: s.reflection.text,
+                    alpha: s.reflection.alpha ?? 0,
+                });
+                patchedTraceIds.push(row.id);
+            }
+            catch (err) {
+                warnings.push({
+                    stage: "persist",
+                    message: "reflect: updateReflection failed",
+                    detail: errDetail(err),
+                });
+            }
+        }
+        const persistMs = now() - persistStart;
+        // Build traces[] mirroring the schema downstream subscribers
+        // expect (reward / L2 induction reads `traces` to seed credit
+        // assignment). For reflect-phase rows we re-emit ScoredStep-shaped
+        // candidates carrying the freshly computed reflection + α; the
+        // already-existing trace ids come from the matched DB rows.
+        const traces = scored.map((s, i) => {
+            const row = matchedRows[i];
+            return {
+                ...s,
+                traceId: (row?.id ?? ""),
+                tags: row?.tags ?? tagsForStep(s),
+                vecSummary: row?.vecSummary ?? null,
+                vecAction: row?.vecAction ?? null,
+            };
+        });
+        const result = {
+            episodeId: input.episode.id,
+            sessionId: input.episode.sessionId,
+            traceIds: patchedTraceIds,
+            traces,
+            startedAt,
+            completedAt: now(),
+            stageTimings: {
+                extract: extractMs,
+                normalize: normalizeMs,
+                reflect: reflectMs,
+                alpha: 0,
+                summarize: 0,
+                embed: 0,
+                persist: persistMs,
+            },
+            llmCalls,
+            warnings,
+        };
+        log.info("capture.reflect.done", {
+            episodeId: input.episode.id,
+            sessionId: input.episode.sessionId,
+            traces: patchedTraceIds.length,
+            llmCalls,
+            totalMs: result.completedAt - startedAt,
+            warnings: warnings.length,
+        });
+        // ONLY here (topic end) do we fire `capture.done`. That kicks off
+        // the reward subscriber → R_human + V backprop, then L2 / L3 /
+        // skill induction. By gating it on the reflect phase we make sure
+        // those expensive downstream stages run once per topic, not once
+        // per turn.
+        emit({ kind: "capture.done", result });
+        return result;
+    }
+    // ─── Internal helpers shared by runLite + runReflect ────────────────────
+    function newLlmCounters() {
+        return {
+            reflectionSynth: 0,
+            alphaScoring: 0,
+            batchedReflection: 0,
+            summarize: 0,
+        };
+    }
+    function emptyResult(input, startedAt, timings, llmCalls, warnings) {
+        return {
+            episodeId: input.episode.id,
+            sessionId: input.episode.sessionId,
+            traceIds: [],
+            traces: [],
+            startedAt,
+            completedAt: now(),
+            stageTimings: {
+                extract: timings.extract,
+                normalize: timings.normalize,
+                reflect: 0,
+                alpha: 0,
+                summarize: 0,
+                embed: 0,
+                persist: 0,
+            },
+            llmCalls,
+            warnings: [
+                ...warnings,
+                { stage: "extract", message: "no usable steps in episode" },
+            ],
+        };
+    }
+    async function runSummarize(scored, summarizeStart, llmCalls, warnings, context) {
+        const concurrency = Math.max(1, deps.cfg.llmConcurrency);
+        const summaries = await runConcurrently(scored, concurrency, async (step) => {
+            try {
+                const s = await summarizer.summarize(step, context);
+                llmCalls.summarize += 1;
+                return s;
+            }
+            catch (err) {
+                warnings.push({
+                    stage: "summarize",
+                    message: "summarizer threw; falling back to userText",
+                    detail: errDetail(err),
+                });
+                return (step.userText ?? step.agentText ?? "").slice(0, 140);
+            }
+        });
+        return { summaries, summarizeMs: now() - summarizeStart };
+    }
+    async function runEmbed(scored, summaries, warnings, opts = {}) {
+        const start = now();
+        if (!deps.cfg.embedTraces || !deps.embedder) {
+            return { vecs: scored.map(() => ({ summary: null, action: null })), embedMs: now() - start };
+        }
+        try {
+            const vecs = await embedSteps(deps.embedder, scored, summaries, opts);
+            return { vecs, embedMs: now() - start };
+        }
+        catch (err) {
+            warnings.push({
+                stage: "embed",
+                message: "embedder threw; inserting null vectors",
+                detail: errDetail(err),
+            });
+            return { vecs: scored.map(() => ({ summary: null, action: null })), embedMs: now() - start };
+        }
+    }
+    function buildRows(scored, summaries, vecs, episode, opts = {}) {
+        const owner = ownerFromEpisode(episode);
+        const traces = scored.map((s, i) => ({
+            ...s,
+            traceId: ids.trace(),
+            tags: tagsForStep(s),
+            vecSummary: vecs[i]?.summary ?? null,
+            vecAction: vecs[i]?.action ?? null,
+        }));
+        return traces.map((t, i) => ({
+            id: t.traceId,
+            episodeId: episode.id,
+            sessionId: episode.sessionId,
+            ...owner,
+            ts: t.ts,
+            userText: t.userText,
+            agentText: t.agentText,
+            summary: summaries[i] ?? null,
+            toolCalls: t.toolCalls,
+            // Reflection + α deliberately empty in lite-phase rows; the
+            // topic-end reflect pass fills them via `updateReflection`.
+            reflection: t.reflection.text,
+            agentThinking: t.agentThinking ?? null,
+            value: 0,
+            alpha: t.reflection.alpha ?? 0,
+            rHuman: null,
+            // V7 §0.6: priority(f1) ∝ max(V,0) · decay(Δt). Seeded at 0.5
+            // so retrieval can find the row immediately; reward backprop
+            // overwrites it once the topic is reflected on.
+            priority: 0.5,
+            tags: opts.lightweightMemory ? mergeTags(t.tags, ["lightweight_memory"]) : t.tags,
+            errorSignatures: extractErrorSignatures({
+                toolCalls: t.toolCalls,
+                agentText: t.agentText,
+                reflection: t.reflection.text ?? undefined,
+            }),
+            vecSummary: t.vecSummary,
+            vecAction: t.vecAction,
+            // step-extractor stamps every sub-step that came from the same
+            // user message with a stable `turnId` (= the user turn's ts).
+            // The viewer collapses rows with identical (episodeId, turnId)
+            // into a single "one round = one memory" card; algorithm-side
+            // machinery ignores the field.
+            turnId: pickTurnId(t.meta, t.ts),
+            schemaVersion: 1,
+        }));
+    }
+    function ownerFromEpisode(episode) {
+        const meta = episode.meta ?? {};
+        const contextHints = meta.contextHints && typeof meta.contextHints === "object"
+            ? meta.contextHints
+            : {};
+        return {
+            ownerAgentKind: stringMeta(meta, "ownerAgentKind") ?? stringMeta(contextHints, "ownerAgentKind") ?? "unknown",
+            ownerProfileId: stringMeta(meta, "ownerProfileId") ?? stringMeta(contextHints, "ownerProfileId") ?? "default",
+            ownerWorkspaceId: stringMeta(meta, "ownerWorkspaceId") ?? stringMeta(contextHints, "ownerWorkspaceId") ?? null,
+        };
+    }
+    function buildTraceCandidates(scored, rows) {
+        const used = new Set();
+        return rows.map((row) => {
+            const idx = scored.findIndex((s, i) => !used.has(i) && rowMatchesStep(row, s));
+            const s = scored[idx >= 0 ? idx : 0];
+            if (idx >= 0)
+                used.add(idx);
+            return {
+                ...s,
+                traceId: row.id,
+                tags: row.tags,
+                vecSummary: row.vecSummary,
+                vecAction: row.vecAction,
+            };
+        });
+    }
+    function rowMatchesStep(row, step) {
+        if (row.ts !== step.ts)
+            return false;
+        const rowTool = row.toolCalls[0];
+        const stepTool = step.toolCalls[0];
+        if (rowTool || stepTool)
+            return rowTool?.name === stepTool?.name;
+        return row.userText === step.userText && row.agentText === step.agentText;
+    }
+    async function persistRows(rows, input, warnings, opts = {}, existingSignatures) {
+        // #2076 + #2077 OCR: uncapped, narrow-projection dedup read. The
+        // paginated `list` path missed all rows past the 500 cap and let
+        // duplicate signatures re-insert every cycle. When the caller has
+        // already computed the signature set upstream (runLite /
+        // runLightweight / runReflect all do), skip the second full scan
+        // and reuse it — otherwise fall back to a fresh streaming scan.
+        // We clone the caller-supplied set so the intra-batch dedup below
+        // doesn't leak new signatures back into the caller's Set instance.
+        const seenSignatures = existingSignatures
+            ? new Set(existingSignatures)
+            : new Set(deps.tracesRepo
+                .listDedupRowsForEpisode(input.episode.id)
+                .map(traceIdentitySignature));
+        const uniqueRows = rows.filter((row) => {
+            const signature = traceIdentitySignature(row);
+            if (seenSignatures.has(signature))
+                return false;
+            seenSignatures.add(signature);
+            return true;
+        });
+        if (uniqueRows.length !== rows.length) {
+            warnings.push({
+                stage: "persist",
+                message: "skipped duplicate trace rows during capture persist",
+                detail: {
+                    skipped: rows.length - uniqueRows.length,
+                    episodeId: input.episode.id,
+                },
+            });
+            rows.splice(0, rows.length, ...uniqueRows);
+        }
+        try {
+            for (const row of rows)
+                deps.tracesRepo.insert(row);
+            enqueueMissingTraceVectors(rows, warnings, opts);
+        }
+        catch (err) {
+            const failure = errDetail(err);
+            log.error("persist.failed", {
+                episodeId: input.episode.id,
+                err: failure,
+            });
+            emit({
+                kind: "capture.failed",
+                episodeId: input.episode.id,
+                sessionId: input.episode.sessionId,
+                stage: "persist",
+                error: {
+                    code: failure.code ?? ERROR_CODES.INTERNAL,
+                    message: failure.message ?? String(err),
+                },
+            });
+            throw err instanceof Error
+                ? err
+                : new MemosError(ERROR_CODES.INTERNAL, "capture.persist failed", failure);
+        }
+        try {
+            const current = deps.episodesRepo.getById(input.episode.id);
+            const currentTraceIds = current?.traceIds ?? input.episode.traceIds;
+            deps.episodesRepo.updateTraceIds(input.episode.id, reconcileTraceIds([...currentTraceIds, ...rows.map((r) => r.id)], input.episode));
+        }
+        catch (err) {
+            warnings.push({
+                stage: "persist",
+                message: "failed to update episode trace_ids_json",
+                detail: errDetail(err),
+            });
+        }
+        return true;
+    }
+    function reconcileTraceIds(traceIds, episode) {
+        const uniqueIds = dedupeTraceIds(traceIds);
+        const rowById = new Map(deps.tracesRepo.getManyByIds(uniqueIds).map((row) => [row.id, row]));
+        const originalIndex = new Map(uniqueIds.map((id, idx) => [id, idx]));
+        const stepOrder = new Map();
+        extractSteps(episode).forEach((step, idx) => {
+            const signature = stepIdentitySignature(step);
+            if (!stepOrder.has(signature))
+                stepOrder.set(signature, idx);
+        });
+        const seenSignatures = new Set();
+        return uniqueIds
+            .filter((id) => rowById.has(id))
+            .sort((a, b) => {
+            const ai = stepOrder.get(traceIdentitySignature(rowById.get(a)));
+            const bi = stepOrder.get(traceIdentitySignature(rowById.get(b)));
+            if (ai != null && bi != null && ai !== bi)
+                return ai - bi;
+            if (ai != null && bi == null)
+                return -1;
+            if (ai == null && bi != null)
+                return 1;
+            return (originalIndex.get(a) ?? 0) - (originalIndex.get(b) ?? 0);
+        })
+            .filter((id) => {
+            const signature = traceIdentitySignature(rowById.get(id));
+            if (seenSignatures.has(signature))
+                return false;
+            seenSignatures.add(signature);
+            return true;
+        });
+    }
+    function dedupeTraceIds(traceIds) {
+        const seen = new Set();
+        const out = [];
+        for (const id of traceIds) {
+            if (seen.has(id))
+                continue;
+            seen.add(id);
+            out.push(id);
+        }
+        return out;
+    }
+    function createTraceMatcher(rows, opts) {
+        const exact = indexRows(rows, traceIdentitySignature);
+        const relaxed = opts.allowRelaxedToolTiming
+            ? indexRows(rows, traceRelaxedIdentitySignature)
+            : new Map();
+        const used = new Set();
+        function takeFrom(index, signature) {
+            const candidates = index.get(signature) ?? [];
+            for (const row of candidates) {
+                if (used.has(row.id))
+                    continue;
+                used.add(row.id);
+                return row;
+            }
+            return null;
+        }
+        return {
+            take(step) {
+                const exactMatch = takeFrom(exact, stepIdentitySignature(step));
+                if (exactMatch)
+                    return exactMatch;
+                if (!opts.allowRelaxedToolTiming)
+                    return null;
+                return takeFrom(relaxed, stepRelaxedIdentitySignature(step));
+            },
+        };
+    }
+    function indexRows(rows, signatureOf) {
+        const out = new Map();
+        for (const row of rows) {
+            const signature = signatureOf(row);
+            const bucket = out.get(signature);
+            if (bucket)
+                bucket.push(row);
+            else
+                out.set(signature, [row]);
+        }
+        return out;
+    }
+    function isRecoveredReplay(episode) {
+        const meta = episode.meta ?? {};
+        return Boolean(meta.recoveredAtStartup) || typeof meta.recoveryReason === "string";
+    }
+    function heuristicTraceSummary(step) {
+        const tool = step.toolCalls[0];
+        const base = firstNonEmpty([
+            step.userText,
+            step.agentText,
+            tool ? `Tool ${tool.name}` : "",
+        ]) || "(empty turn)";
+        return base.replace(/\s+/g, " ").trim().slice(0, 140);
+    }
+    function stepIdentitySignature(step) {
+        const tool = step.toolCalls[0];
+        const turnId = pickTurnId(step.meta, step.ts);
+        if (tool) {
+            const hasRealTiming = typeof tool.startedAt === "number" || typeof tool.endedAt === "number";
+            return [
+                "tool",
+                turnId,
+                tool.name,
+                hasRealTiming ? tool.startedAt ?? "" : step.ts,
+                hasRealTiming ? tool.endedAt ?? "" : "",
+                stableJson(tool.input),
+                stableJson(tool.output),
+                tool.errorCode ?? "",
+            ].join("\x1f");
+        }
+        if (step.agentText.trim()) {
+            return ["assistant", turnId, step.ts, step.agentText.trim()].join("\x1f");
+        }
+        return ["user", turnId, step.ts, step.userText.trim()].join("\x1f");
+    }
+    function stepRelaxedIdentitySignature(step) {
+        const tool = step.toolCalls[0];
+        const turnId = pickTurnId(step.meta, step.ts);
+        if (tool) {
+            return [
+                "tool",
+                turnId,
+                tool.name,
+                stableJson(tool.input),
+                stableJson(tool.output),
+                tool.errorCode ?? "",
+            ].join("\x1f");
+        }
+        if (step.agentText.trim()) {
+            return ["assistant", turnId, step.agentText.trim()].join("\x1f");
+        }
+        return ["user", turnId, step.userText.trim()].join("\x1f");
+    }
+    function traceIdentitySignature(row) {
+        const tool = row.toolCalls[0];
+        if (tool) {
+            const hasRealTiming = typeof tool.startedAt === "number" || typeof tool.endedAt === "number";
+            return [
+                "tool",
+                row.turnId,
+                tool.name,
+                hasRealTiming ? tool.startedAt ?? "" : row.ts,
+                hasRealTiming ? tool.endedAt ?? "" : "",
+                stableJson(tool.input),
+                stableJson(tool.output),
+                tool.errorCode ?? "",
+            ].join("\x1f");
+        }
+        if (row.agentText.trim()) {
+            return ["assistant", row.turnId, row.ts, row.agentText.trim()].join("\x1f");
+        }
+        return ["user", row.turnId, row.ts, row.userText.trim()].join("\x1f");
+    }
+    function traceRelaxedIdentitySignature(row) {
+        const tool = row.toolCalls[0];
+        if (tool) {
+            return [
+                "tool",
+                row.turnId,
+                tool.name,
+                stableJson(tool.input),
+                stableJson(tool.output),
+                tool.errorCode ?? "",
+            ].join("\x1f");
+        }
+        if (row.agentText.trim()) {
+            return ["assistant", row.turnId, row.agentText.trim()].join("\x1f");
+        }
+        return ["user", row.turnId, row.userText.trim()].join("\x1f");
+    }
+    function stableJson(value) {
+        if (value === undefined)
+            return "";
+        return JSON.stringify(sortJson(value));
+    }
+    function sortJson(value) {
+        if (Array.isArray(value))
+            return value.map(sortJson);
+        if (!value || typeof value !== "object")
+            return value;
+        return Object.fromEntries(Object.entries(value)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([key, val]) => [key, sortJson(val)]));
+    }
+    function enqueueMissingTraceVectors(rows, warnings, opts = {}) {
+        if (!deps.cfg.embedTraces || !deps.embeddingRetryQueue || !deps.embedder)
+            return;
+        const queuedAt = now();
+        let queued = 0;
+        for (const row of rows) {
+            if (!row.vecSummary) {
+                deps.embeddingRetryQueue.enqueue({
+                    id: `er_${ids.span()}`,
+                    targetKind: "trace",
+                    targetId: row.id,
+                    vectorField: "vec_summary",
+                    sourceText: row.summary?.trim() || row.userText.trim() || "(empty)",
+                    now: queuedAt,
+                });
+                queued++;
+            }
+            if (!opts.skipActionVectorRetry && !row.vecAction) {
+                deps.embeddingRetryQueue.enqueue({
+                    id: `er_${ids.span()}`,
+                    targetKind: "trace",
+                    targetId: row.id,
+                    vectorField: "vec_action",
+                    sourceText: traceActionText(row),
+                    now: queuedAt,
+                });
+                queued++;
+            }
+        }
+        if (queued > 0) {
+            warnings.push({
+                stage: "embed",
+                message: "embedding retry queued for missing trace vectors",
+                detail: { queued },
+            });
+        }
+    }
+    function mergeTags(existing, extra) {
+        return Array.from(new Set([...existing, ...extra])).sort();
+    }
+    function finalResult(input, startedAt, traceIds, traces, timings, llmCalls, warnings) {
+        return {
+            episodeId: input.episode.id,
+            sessionId: input.episode.sessionId,
+            traceIds,
+            traces,
+            startedAt,
+            completedAt: now(),
+            stageTimings: timings,
+            llmCalls,
+            warnings,
+        };
+    }
+    /**
+     * Used by `runLite`'s short-circuit error branch — captures the
+     * partially-computed scored steps as TraceCandidates so the result
+     * still carries debug info even when persistence failed.
+     */
+    function toCandidate(rows) {
+        return (s, i) => ({
+            ...s,
+            traceId: (rows[i]?.id ?? ""),
+            tags: rows[i]?.tags ?? tagsForStep(s),
+            vecSummary: rows[i]?.vecSummary ?? null,
+            vecAction: rows[i]?.vecAction ?? null,
+        });
+    }
+    return { runLite, runLightweight, runReflect };
+}
+function planScoring(cfg, stepCount, hasLlm) {
+    if (!hasLlm)
+        return "per_step";
+    if (stepCount === 0)
+        return "per_step";
+    if (cfg.batchMode === "per_step")
+        return "per_step";
+    return stepCount <= Math.max(1, cfg.batchThreshold) ? "batch" : "chunk_batch";
+}
+function contextModeFor(cfg, scoringPlan, stepCount) {
+    const mode = cfg.reflectionContextMode;
+    const includeTask = mode === "task" || mode === "task_downstream";
+    const wantsDownstream = mode === "downstream" || mode === "task_downstream";
+    const longPerStep = scoringPlan === "per_step" && stepCount > cfg.batchThreshold;
+    const includeDownstream = wantsDownstream &&
+        cfg.longEpisodeReflectMode === "per_step_downstream" &&
+        cfg.downstreamStepCount > 0 &&
+        cfg.downstreamContextMaxChars > 0 &&
+        longPerStep;
+    return { includeTask, includeDownstream };
+}
+function buildReflectionContexts(steps, taskSummary, downstreamByStep) {
+    return steps.map((_, idx) => ({
+        taskSummary,
+        downstream: downstreamByStep[idx] ?? [],
+    }));
+}
+async function runBatchScoring(normalized, llm, deps, warnings, llmCalls, episodeId, taskSummary, budget) {
+    const inputs = normalized.map((step) => ({
+        step,
+        existingReflection: extractReflection(step),
+    }));
+    if (!budget.tryUse("batch"))
+        return [];
+    try {
+        const out = await batchScoreReflections(llm, inputs, {
+            synthReflections: deps.cfg.synthReflections,
+            episodeId,
+            phase: "reflect",
+            taskSummary,
+        });
+        llmCalls.batchedReflection += 1;
+        return normalized.map((step, i) => ({
+            ...step,
+            reflection: out.scores[i] ?? disabledScore(null, "none"),
+        }));
+    }
+    catch (err) {
+        budget.stopIfTerminal(err, "batch");
+        // Single failure mode: the batched call (or its validator) threw.
+        // Fall back to per-step in the caller. We surface a warning so the
+        // viewer can show "batch path degraded" without crashing capture.
+        warnings.push({
+            stage: "batch",
+            message: "batched reflection scoring failed; falling back to per-step",
+            detail: errDetail(err),
+        });
+        return [];
+    }
+}
+async function runChunkedBatchScoring(normalized, llm, deps, warnings, llmCalls, episodeId, taskSummary, budget) {
+    const chunkSize = Math.max(1, deps.cfg.batchThreshold);
+    const chunks = [];
+    for (let start = 0; start < normalized.length; start += chunkSize) {
+        chunks.push(normalized.slice(start, start + chunkSize));
+    }
+    const concurrency = Math.max(1, deps.cfg.llmConcurrency);
+    const scoredChunks = await runConcurrently(chunks, concurrency, async (chunk) => {
+        const scored = await runBatchScoring(chunk, llm, deps, warnings, llmCalls, episodeId, taskSummary, budget);
+        if (scored.length > 0)
+            return scored;
+        return runPerStepScoring(chunk, llm, deps, warnings, llmCalls, episodeId, buildReflectionContexts(chunk, taskSummary, chunk.map(() => [])), budget);
+    });
+    return scoredChunks.flat();
+}
+async function runPerStepScoring(normalized, llm, deps, warnings, llmCalls, episodeId, contexts, budget) {
+    const concurrency = Math.max(1, deps.cfg.llmConcurrency);
+    return runConcurrently(normalized, concurrency, async (step, idx) => {
+        const context = contexts[idx] ?? {};
+        const { score, synthCount } = await resolveReflection(step, llm, deps, warnings, episodeId, context, budget);
+        llmCalls.reflectionSynth += synthCount;
+        const finalScore = await resolveAlpha(step, score, llm, deps, warnings, episodeId, context, budget);
+        if (finalScore !== score)
+            llmCalls.alphaScoring += 1;
+        return { ...step, reflection: finalScore };
+    });
+}
+async function resolveReflection(step, llm, deps, warnings, episodeId, context, budget) {
+    const adapterProvided = step.rawReflection !== null && step.rawReflection.trim().length > 0;
+    const extracted = extractReflection(step);
+    if (extracted) {
+        return {
+            score: disabledScore(extracted, adapterProvided ? "adapter" : "extracted"),
+            synthCount: 0,
+        };
+    }
+    if (!deps.cfg.synthReflections || !llm) {
+        return { score: disabledScore(null, "none"), synthCount: 0 };
+    }
+    if (!budget.tryUse("reflection.synth")) {
+        return { score: disabledScore(null, "none"), synthCount: 0 };
+    }
+    try {
+        const synth = await synthesizeReflection(llm, step, {
+            episodeId,
+            phase: "reflect",
+            taskSummary: context.taskSummary,
+            downstream: context.downstream,
+            outcomeMaxChars: deps.cfg.synthOutcomeMaxChars,
+        });
+        if (synth.text) {
+            return {
+                score: { text: synth.text, alpha: null, usable: true, source: "synth", model: synth.model },
+                synthCount: 1,
+            };
+        }
+        return { score: disabledScore(null, "none"), synthCount: 1 };
+    }
+    catch (err) {
+        budget.stopIfTerminal(err, "reflection.synth");
+        warnings.push({
+            stage: "reflection.synth",
+            message: "synth failed",
+            detail: errDetail(err),
+        });
+        return { score: disabledScore(null, "none"), synthCount: 0 };
+    }
+}
+async function resolveAlpha(step, current, llm, deps, warnings, episodeId, context, budget) {
+    if (!current.text)
+        return current; // nothing to grade
+    if (!deps.cfg.alphaScoring || !llm)
+        return current;
+    if (!budget.tryUse("alpha"))
+        return current;
+    try {
+        const scored = await scoreReflection(llm, {
+            step,
+            reflectionText: current.text,
+            episodeId,
+            phase: "reflect",
+            taskSummary: context.taskSummary,
+            downstream: context.downstream,
+            outcomeMaxChars: deps.cfg.synthOutcomeMaxChars,
+        });
+        return {
+            ...current,
+            alpha: scored.alpha,
+            usable: scored.usable,
+            reason: scored.reason,
+            model: scored.model,
+        };
+    }
+    catch (err) {
+        budget.stopIfTerminal(err, "alpha");
+        warnings.push({
+            stage: "alpha",
+            message: "alpha scoring failed; keeping neutral α",
+            detail: errDetail(err),
+        });
+        return current;
+    }
+}
+async function runConcurrently(items, concurrency, fn) {
+    const out = new Array(items.length);
+    let cursor = 0;
+    const workers = [];
+    const worker = async () => {
+        while (true) {
+            const i = cursor++;
+            if (i >= items.length)
+                return;
+            out[i] = await fn(items[i], i);
+        }
+    };
+    for (let w = 0; w < Math.min(concurrency, items.length); w++) {
+        workers.push(worker());
+    }
+    await Promise.all(workers);
+    return out;
+}
+function createReflectLlmBudget(configuredLimit, warnings, episodeId) {
+    const limit = Math.max(0, Math.floor(configuredLimit));
+    let used = 0;
+    let stopped = false;
+    let exhaustedWarned = false;
+    let terminalWarned = false;
+    return {
+        tryUse(stage) {
+            if (stopped || used >= limit) {
+                if (!exhaustedWarned) {
+                    exhaustedWarned = true;
+                    warnings.push({
+                        stage,
+                        message: "reflect LLM budget exhausted; using non-LLM fallback for remaining steps",
+                        detail: { episodeId, limit, used, stopped },
+                    });
+                }
+                return false;
+            }
+            used += 1;
+            return true;
+        },
+        stopIfTerminal(err, stage) {
+            if (!isTerminalReflectLlmError(err))
+                return;
+            stopped = true;
+            if (terminalWarned)
+                return;
+            terminalWarned = true;
+            warnings.push({
+                stage,
+                message: "terminal reflect LLM error; stopped remaining reflect LLM calls",
+                detail: { episodeId, limit, used, ...errDetail(err) },
+            });
+        },
+    };
+}
+function isTerminalReflectLlmError(err) {
+    if (!(err instanceof MemosError)) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return terminalMessage(msg);
+    }
+    if (err.code !== ERROR_CODES.LLM_UNAVAILABLE)
+        return terminalMessage(err.message);
+    const details = (err.details ?? {});
+    if (details.circuitOpen === true)
+        return true;
+    const status = Number(details.status);
+    if (status === 401 || status === 402 || status === 403)
+        return true;
+    return terminalMessage(err.message);
+}
+function terminalMessage(message) {
+    const msg = message.toLowerCase();
+    return (msg.includes("circuit_open") ||
+        msg.includes("insufficient balance") ||
+        msg.includes("invalid api key") ||
+        msg.includes("invalid_api_key") ||
+        msg.includes("unauthorized") ||
+        msg.includes("account suspended") ||
+        msg.includes("billing"));
+}
+function errDetail(err) {
+    if (err instanceof MemosError)
+        return { code: err.code, message: err.message, ...(err.details ?? {}) };
+    if (err instanceof Error)
+        return { name: err.name, message: err.message };
+    return { value: String(err) };
+}
+function traceActionText(row) {
+    const toolSig = row.toolCalls
+        .map((t) => `${t.name}(${safeStringify(t.input).slice(0, 300)})`)
+        .join("; ");
+    return [row.agentText.trim(), toolSig].filter((s) => s.length > 0).join("\n---\n") || "(empty)";
+}
+function buildTaskReflectionSummary(episode, steps, maxChars = 1_200) {
+    const firstUser = episode.turns.find((t) => t.role === "user" && t.content.trim());
+    const finalAssistant = [...episode.turns]
+        .reverse()
+        .find((t) => t.role === "assistant" && t.content.trim());
+    const toolNames = Array.from(new Set(steps.flatMap((s) => s.toolCalls.map((t) => t.name).filter(Boolean)))).slice(0, 12);
+    const parts = [
+        firstUser ? `Task: ${clipForPrompt(firstUser.content, Math.min(500, maxChars))}` : "",
+        `Intent: ${episode.intent.kind} (${episode.intent.reason})`,
+        finalAssistant ? `Final assistant response: ${clipForPrompt(finalAssistant.content, Math.min(500, maxChars))}` : "",
+        toolNames.length > 0 ? `Tools used: ${toolNames.join(", ")}` : "",
+    ].filter(Boolean);
+    const summary = parts.length > 0 ? parts.join("\n") : null;
+    return summary ? clipForPrompt(summary, maxChars) : null;
+}
+function buildDownstreamStepPreviews(steps, cfg) {
+    return steps.map((_, idx) => {
+        const out = [];
+        let usedChars = 0;
+        const count = Math.max(0, Math.min(3, cfg.downstreamStepCount));
+        for (let offset = 1; offset <= count; offset++) {
+            const step = steps[idx + offset];
+            if (!step)
+                break;
+            const remaining = cfg.downstreamContextMaxChars - usedChars;
+            if (remaining <= 0)
+                break;
+            const item = downstreamPreviewForStep(step, offset, Math.min(cfg.downstreamPerStepMaxChars, remaining));
+            usedChars += previewSize(item);
+            out.push(item);
+        }
+        return out;
+    });
+}
+function downstreamPreviewForStep(step, offset, maxChars) {
+    const existingReflection = extractReflection(step);
+    if (step.toolCalls.length > 0) {
+        return {
+            offset,
+            kind: "tooluse",
+            toolNames: step.toolCalls.map((t) => t.name).filter(Boolean),
+            toolOutput: clipForPrompt(summarizeToolOutputs(step), maxChars),
+            reflection: existingReflection ? clipForPrompt(existingReflection, Math.floor(maxChars / 2)) : null,
+        };
+    }
+    return {
+        offset,
+        kind: "text",
+        text: clipForPrompt(textPreviewForStep(step), maxChars),
+    };
+}
+function summarizeToolOutputs(step) {
+    return step.toolCalls
+        .map((t) => {
+        const label = t.errorCode ? `${t.name} ERROR[${t.errorCode}]` : t.name;
+        const output = outputOfToolCall(t);
+        return `${label}: ${output || "(no output)"}`;
+    })
+        .join("\n");
+}
+function outputOfToolCall(t) {
+    if (t.output === undefined || t.output === null)
+        return "";
+    if (typeof t.output === "string")
+        return t.output;
+    try {
+        return JSON.stringify(t.output);
+    }
+    catch {
+        return String(t.output);
+    }
+}
+function textPreviewForStep(step) {
+    const parts = [
+        step.userText.trim() ? `state: ${step.userText.trim()}` : "",
+        step.agentText.trim() ? `action: ${step.agentText.trim()}` : "",
+    ].filter(Boolean);
+    return parts.join("\n") || "(empty)";
+}
+function previewSize(item) {
+    return [
+        item.kind,
+        item.text,
+        item.toolNames?.join(", "),
+        item.toolOutput,
+        item.reflection,
+    ]
+        .filter(Boolean)
+        .join("\n").length;
+}
+function stringMeta(meta, key) {
+    const value = meta[key];
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+function safeStringify(v) {
+    if (v === undefined || v === null)
+        return "";
+    if (typeof v === "string")
+        return v;
+    try {
+        return JSON.stringify(v);
+    }
+    catch {
+        return String(v);
+    }
+}
+function clipForPrompt(s, n) {
+    return s.length > n ? `${s.slice(0, n)}...` : s;
+}
+function mergeTurnSteps(episodeId, turnId, steps) {
+    const ordered = [...steps].sort((a, b) => a.ts - b.ts);
+    const first = ordered[0];
+    const userText = firstNonEmpty(ordered.map((s) => s.userText));
+    const agentText = ordered
+        .map((s) => s.agentText.trim())
+        .filter(Boolean)
+        .join("\n\n");
+    const agentThinking = ordered
+        .map((s) => s.agentThinking?.trim() ?? "")
+        .filter(Boolean)
+        .join("\n\n") || null;
+    const rawReflection = firstNonEmpty(ordered.map((s) => s.rawReflection ?? ""));
+    const toolCalls = ordered.flatMap((s) => s.toolCalls);
+    const lastTs = ordered.reduce((m, s) => Math.max(m, s.ts), first.ts);
+    return {
+        key: `${episodeId}:${turnId}:lightweight`,
+        ts: lastTs,
+        userText,
+        agentText,
+        agentThinking,
+        toolCalls,
+        rawReflection: rawReflection || null,
+        depth: Math.min(...ordered.map((s) => s.depth)),
+        isSubagent: ordered.some((s) => s.isSubagent),
+        meta: {
+            ...ordered.reduce((acc, s) => ({ ...acc, ...s.meta }), {}),
+            turnId,
+            lightweightMemory: true,
+        },
+    };
+}
+function firstNonEmpty(values) {
+    return values.map((v) => v.trim()).find(Boolean) ?? "";
+}
+/**
+ * Pull the `turnId` stamped by `step-extractor` out of the
+ * `StepCandidate.meta` blob. Falls back to the trace's own `ts` so
+ * old fixtures that pre-date the field still group as a singleton
+ * (one row → one card). Always returns a finite number.
+ */
+function pickTurnId(meta, fallbackTs) {
+    const raw = meta?.turnId;
+    return typeof raw === "number" && Number.isFinite(raw) ? raw : fallbackTs;
+}
+//# sourceMappingURL=capture.js.map
