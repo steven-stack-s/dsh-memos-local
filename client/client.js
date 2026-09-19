@@ -134,12 +134,15 @@ window.__ModuleLoader__.load({
         state === 'online' ? t.statusOnline :
         state === 'offline' ? t.statusOffline : t.statusChecking;
       // Layouts — re-created each render so DSH slot proxies re-read props.
-      const row = (children) => h('div', {
-        style: {
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 12, padding: '6px 0',
-        },
-      }, children);
+      const row = function () {
+        const kids = Array.prototype.slice.call(arguments);
+        return h('div', {
+          style: {
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 12, padding: '6px 0',
+          },
+        }, kids);
+      };
       const toggle = h('button', {
         onClick: async () => {
           if (authBusy || authEnabled === null) return;
@@ -157,7 +160,7 @@ window.__ModuleLoader__.load({
             setAuthBusy(false);
           }
         },
-        disabled: authBusy || authEnabled === null || state !== 'online',
+        disabled: authBusy || authEnabled === null,
         style: {
           margin: 0, padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
           fontSize: 12, fontWeight: 600, border: '1px solid transparent',
@@ -172,7 +175,7 @@ window.__ModuleLoader__.load({
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
             h('span', { style: { fontWeight: 600 } }, t.authLabel + ': ' + (authEnabled === null ? '…' : (authEnabled ? t.authOn : t.authOff))),
             h('span', { style: { opacity: 0.65, fontSize: 12 } }, t.authHint),
-            authErr && h('span', { style: { color: '#ff4d4f', fontSize: 12 } }, t.authErr),
+            authErr ? h('span', { style: { color: '#ff4d4f', fontSize: 12 } }, t.authErr) : null,
           ),
           toggle,
         ),
