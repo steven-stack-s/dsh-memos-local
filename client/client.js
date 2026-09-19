@@ -30,6 +30,10 @@ window.__ModuleLoader__.load({
       statusOffline: '查看器离线 / 不可达',
       statusChecking: '正在检查查看器状态…',
       versionLabel: '版本',
+      title: 'MemOS',
+      healthOk: '模型就绪',
+      healthDegraded: '有模型不可用',
+      healthUnknown: '模型状态未知',
       open: '打开记忆查看器',
       authOn: '密码保护已开启',
       authOff: '密码保护已关闭',
@@ -51,6 +55,10 @@ window.__ModuleLoader__.load({
       statusOffline: 'Viewer offline / unreachable',
       statusChecking: 'Checking viewer status…',
       versionLabel: 'Version',
+      title: 'MemOS',
+      healthOk: 'Models ready',
+      healthDegraded: 'A model is unavailable',
+      healthUnknown: 'Model status unknown',
       open: 'Open Memory Viewer',
       authOn: 'Password protection enabled',
       authOff: 'Password protection disabled',
@@ -112,6 +120,7 @@ window.__ModuleLoader__.load({
       const [lang, setLang] = React.useState(getActiveLang());
       const [state, setState] = React.useState('checking');
       const [version, setVersion] = React.useState(null);
+      const [modelOk, setModelOk] = React.useState(null); // null=unknown
       // null means the auth status has not been read yet.
       const [authEnabled, setAuthEnabled] = React.useState(null);
       const [authBusy, setAuthBusy] = React.useState(false);
@@ -138,8 +147,12 @@ window.__ModuleLoader__.load({
         fetch('/memos/api/v1/health', { signal: AbortSignal.timeout(2500) })
           .then((res) => (res.ok ? res.json() : null))
           .then((body) => {
-            if (body && typeof body.version === 'string' && body.version) {
+            if (!body) return;
+            if (typeof body.version === 'string' && body.version) {
               setVersion(body.version);
+            }
+            if (body.llm && body.embedder) {
+              setModelOk(!!body.llm.available && !!body.embedder.available);
             }
           })
           .catch(() => {});
@@ -218,18 +231,51 @@ window.__ModuleLoader__.load({
         },
         sandbox: 'allow-same-origin allow-scripts allow-forms allow-popups',
       });
-      const header = h('div', { style: { padding: '8px 0', fontSize: 13, lineHeight: 1.6 } },
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
-          versionText ? h('span', {
-            title: t.versionLabel,
-            style: {
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-              fontSize: 12, padding: '1px 7px', borderRadius: 999,
-              border: '1px solid rgba(128,128,128,.35)', opacity: 0.85,
-            },
-          }, versionText) : null,
-          h('span', {}, statusText),
+      // Health dot: green only when both the LLM and the embedder report
+      // available. Mirrors the viewer sidebar indicator.
+      const healthColor =
+        modelOk === null ? 'rgba(128,128,128,.65)' :
+        modelOk ? '#2f8f4e' : '#e0a030';
+      const healthLabel =
+        modelOk === null ? t.healthUnknown :
+        modelOk ? t.healthOk : t.healthDegraded;
+      const header = h('div', { style: { padding: '4px 0 10px' } },
+        // Title row.
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 } },
+          h('span', { style: { fontSize: 15, fontWeight: 700, letterSpacing: '-.01em' } }, t.title),
         ),
+        // Status row: health dot + version pill + viewer status.
+        h('div', {
+          style: {
+            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+            fontSize: 13, lineHeight: 1.6,
+          },
+        },
+          h('span', {
+            key: 'health',
+            title: healthLabel,
+            'aria-label': healthLabel,
+            style: {
+              width: 8, height: 8, borderRadius: 999, flexShrink: 0,
+              background: healthColor,
+              boxShadow: '0 0 0 3px color-mix(in srgb, ' + healthColor + ' 22%, transparent)',
+            },
+          }),
+          // Rendered unconditionally (empty until health resolves) so the
+          // three status children keep a stable position across renders
+          // instead of relying on diff-time insertion.
+          h('span', {
+            key: 'version',
+            title: versionText ? t.versionLabel : undefined,
+            style: versionText ? {
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontSize: 12, padding: '1px 8px', borderRadius: 999,
+              border: '1px solid rgba(128,128,128,.35)', opacity: 0.85,
+            } : { display: 'none' },
+          }, versionText),
+          h('span', { key: 'status', style: { opacity: 0.9 } }, statusText),
+        ),
+        // Auth row.
         h('div', { style: rowStyle }, authInfo, toggle),
       );
       const body =

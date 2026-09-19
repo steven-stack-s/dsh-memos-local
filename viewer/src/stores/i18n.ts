@@ -22,6 +22,11 @@ import { signal, computed } from "@preact/signals";
 // add to English first so TypeScript can derive the union type.
 
 const en = {
+  // Sidebar health dot (LLM + embedder availability). The version text that
+  // used to sit next to it now lives on the DSH Settings → Memory card.
+  "sidebar.health.ok": "Models ready",
+  "sidebar.health.degraded": "A model is unavailable",
+  "sidebar.health.unknown": "Model status unknown",
   // Navigation (sidebar).
   "nav.overview": "Overview",
   "nav.memories": "Memories",
@@ -966,6 +971,11 @@ const en = {
 type TranslationKey = keyof typeof en;
 
 const zh: Record<TranslationKey, string> = {
+  // 侧边栏健康点（LLM + 嵌入模型可用性）。原先紧邻的版本号文字已移至
+  // DSH 设置 → 记忆 卡片。
+  "sidebar.health.ok": "模型就绪",
+  "sidebar.health.degraded": "有模型不可用",
+  "sidebar.health.unknown": "模型状态未知",
   "nav.overview": "总览",
   "nav.memories": "记忆",
   "nav.tasks": "任务",

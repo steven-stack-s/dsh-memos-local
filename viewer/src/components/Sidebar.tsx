@@ -59,6 +59,14 @@ const SECTIONS: NavSection[] = [
 export function Sidebar() {
   const current = route.value.path;
   const h = health.value;
+  // Health dot: green only when both the LLM and the embedder are available.
+  // The dot stays in the sidebar (it reports live health); the version text
+  // that used to sit beside it moved to DSH Settings → Memory.
+  const healthDot: { color: string; labelKey: "sidebar.health.ok" | "sidebar.health.degraded" | "sidebar.health.unknown" } = !h
+    ? { color: "var(--fg-dim)", labelKey: "sidebar.health.unknown" }
+    : h.llm?.available && h.embedder?.available
+    ? { color: "var(--success)", labelKey: "sidebar.health.ok" }
+    : { color: "var(--warning)", labelKey: "sidebar.health.degraded" };
   const bridge = h?.bridge;
   const bridgeVisual = bridgeVisualFor(bridge?.status ?? "unknown");
   const bridgeTitle = bridge ? bridgeTooltip(bridge) : "";
@@ -90,22 +98,30 @@ export function Sidebar() {
       ))}
 
       {/*
-        * The version pill that used to sit here now lives on the DSH
-        * Settings → Memory card (next to the viewer status line), so the
-        * embedded/standalone viewer no longer duplicates it. Only the
-        * bridge indicator — which describes live connectivity rather than
-        * build identity — stays in the sidebar.
+        * The version text that used to sit beside the health dot now lives on
+        * the DSH Settings → Memory card, so the viewer no longer duplicates
+        * it. The health dot itself is kept — it reports live LLM/embedder
+        * availability, which the settings card does not.
         */}
-      {bridge && (
+      {h && (
         <div class="sidebar__status">
-          <div class="sidebar__bridge" title={bridgeTitle}>
+          <div class="sidebar__version" title={t(healthDot.labelKey)}>
             <span
               class="dot"
               aria-hidden="true"
-              style={`width:6px;height:6px;border-radius:999px;background:${bridgeVisual.color};box-shadow:0 0 0 3px color-mix(in srgb, ${bridgeVisual.color} 20%, transparent)`}
+              style={`width:6px;height:6px;border-radius:999px;background:${healthDot.color};box-shadow:0 0 0 3px color-mix(in srgb, ${healthDot.color} 20%, transparent)`}
             />
-            <span class="sidebar__bridge-text">{t(bridgeVisual.labelKey)}</span>
           </div>
+          {bridge && (
+            <div class="sidebar__bridge" title={bridgeTitle}>
+              <span
+                class="dot"
+                aria-hidden="true"
+                style={`width:6px;height:6px;border-radius:999px;background:${bridgeVisual.color};box-shadow:0 0 0 3px color-mix(in srgb, ${bridgeVisual.color} 20%, transparent)`}
+              />
+              <span class="sidebar__bridge-text">{t(bridgeVisual.labelKey)}</span>
+            </div>
+          )}
         </div>
       )}
     </aside>
