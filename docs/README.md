@@ -1,23 +1,20 @@
 # docs/ — developer-facing documentation
 
-For *user-facing* help (getting started, configuration, viewer tour), open the
-viewer's *Help* page at runtime — it ships with the plugin's `viewer/` bundle.
+Developer docs for the `dsh-memos-local` fork. For *user-facing* help
+(starting, configuration, viewer tour), see the plugin's [DeepSeek Harness
+adapter guide](../adapters/deepseek-harness/README.md) or open the viewer's
+*Help* page at runtime.
 
 ## Document index
 
-| File                          | What it covers                                          |
-|-------------------------------|---------------------------------------------------------|
-| `Reflect2Skill_算法设计核心.md` | Reflect2Evolve V7 算法规范（中文原版）。               |
-| `ALGORITHM_ALIGNMENT.md`      | 算法 ↔ 实现的逐节对照表，标记 ✅/⚠️/❌。              |
-| **`GRANULARITY-AND-MEMORY-LAYERS.md`** | **术语与粒度对齐：小步 / 轮 / 任务、经验 / 环境认知 / 技能 之间的关系，打分与检索的粒度选择。读其它文档前先看这一篇。** |
-| `DATA-MODEL.md`               | Every SQLite table, column, and index.                  |
-| `EVENTS.md`                   | Every `CoreEventType`, when it fires, payload shape.    |
-| `PROMPTS.md`                  | Prompt anatomy, evaluation samples, golden outputs.     |
-| `BRIDGE-PROTOCOL.md`          | JSON-RPC method list, error semantics, stdio + TCP.     |
-| `ADAPTER-AUTHORING.md`        | How to wire a new agent against `agent-contract/`.      |
-| `LOGGING.md`                  | Channel taxonomy, redaction, retention, dashboards.     |
-| `FRONTEND-VALIDATION.md`      | Scripted "say X to the agent → expect Y in viewer".     |
-| `RELEASE-PROCESS.md`          | Versioning, release notes, CI gates.                    |
-
-These files are filled in over Phases 1–25; until each phase lands, you'll
-find a short stub explaining what will go there.
+| File | What it covers |
+|---|---|
+| `Reflect2Skill_算法设计核心.md` | The interaction-driven self-evolution framework (V7) — the core memory/reward/retrieval/skill algorithm spec (Chinese). |
+| `GRANULARITY-AND-MEMORY-LAYERS.md` | Terms & granularity alignment: steps / turns / tasks vs. experience / world model / skill; scoring & retrieval granularity. Start here before other docs. |
+| `ALGORITHM_ALIGNMENT.md` | Section-by-section algorithm ↔ implementation alignment table (✅/⚠️/❌). |
+| `DATA-MODEL.md` | Every SQLite table, column, and index. |
+| `CONFIG-ADVANCED.md` | Advanced `config.yaml` options. |
+| `LOGGING.md` | Log channel taxonomy, redaction, retention. |
+| `PROMPT-INJECTION-AND-RETRIEVAL-FILTER.md` | Prompt injection and retrieval filtering. |
+| `MULTI_AGENT_VIEWER.md` | Viewer behavior with multiple agents. |
+| `RFC-001-l2-induction-prompt-business-granularity.md` | RFC for L2 induction-prompt business granularity. |

@@ -3,25 +3,30 @@
 **English** | [简体中文](./README.zh-CN.md)
 
 > **DSH fork** of `@memtensor/memos-local-plugin` (MemTensor/MemOS).
-> Subtree-split from the MemOS monorepo (apps/memos-local-plugin) with full
+> Subtree-split from the MemOS monorepo (`apps/memos-local-plugin`) with full
 > commit history preserved.
 > Maintained by steven-stack-s for DeepSeek Harness (DSH).
 
-## 与上游的关系（subtree 同步）
+## Relation to upstream (subtree sync)
 
-本仓库用 `git subtree split` 从 MemTensor/MemOS monorepo 的
-`apps/memos-local-plugin` 独立出来，保留了该子目录的完整提交历史。
-同步上游 core 算法更新：
+This repository was split out of the MemTensor/MemOS monorepo's
+`apps/memos-local-plugin` directory with `git subtree split`, preserving that
+subtree's full commit history. To pull in upstream core algorithm updates:
 
 ```bash
-# remote upstream 已配置（只读）。拉取上游一棵完整的 monorepo tree：
+# The read-only "upstream" remote is already configured. Fetch one complete
+# monorepo tree from upstream:
 git fetch upstream
-# 把上游最新的 apps/memos-local-plugin 结点合并进来（subtree 合并）：
+# Merge the up-to-date apps/memos-local-plugin node (subtree merge):
 git subtree merge --squash -P . upstream/<branch>
-# 或更精确地，用 --prefix 提取上游该子目录的最新内容后整体整合。
+# or extract the subtree's latest content with --prefix and integrate it.
 ```
 
-> 说明：core 算法逻辑尽量少改，以便 subtree 合并冲突最小化。
+> Keep core algorithm changes minimal to reduce subtree merge conflicts. DSH
+> specific changes live in the "distribution layer" — `adapters/deepseek-harness/`,
+> `client/`, and `package.json` (`exports`) — and may need manual conflict
+> resolution during merges.
+
 ## What it is
 
 A local-first, file-backed memory system that gives an agent four cooperating
@@ -45,36 +50,30 @@ the right time.
 ## Layout (high-level)
 
 ```
-apps/memos-local-plugin/
-├── agent-contract/      # Stable types + JSON-RPC protocol shared with adapters
-├── core/                # Agent-agnostic algorithm (memory, reward, retrieval, skill, hub, …)
-├── server/              # HTTP + SSE server (powers the viewer)
-├── bridge.cts + bridge/ # JSON-RPC bridge (used by Hermes Python adapter)
-├── adapters/openclaw/   # In-process TS adapter for OpenClaw
-├── adapters/hermes/     # Python adapter that talks to bridge.cts
-├── adapters/deepseek-harness/ # In-process Cordis bundle for DSH
-├── templates/           # config.yaml templates copied to the user's home on install
-├── viewer/              # Runtime viewer (Vite, served by server/)
-├── docs/                # Developer-facing docs (algorithm, data model, prompts, …)
-├── scripts/             # Build / packaging / release helpers
-└── tests/               # unit / integration / e2e (vitest)
+adapters/deepseek-harness/ # DSH Cordis plugin (server) — this fork's DSH entry
+adapters/openclaw/         # In-process TS adapter for OpenClaw (kept from upstream)
+adapters/hermes/           # Python adapter talking to bridge.cts (kept from upstream)
+agent-contract/            # Stable types + JSON-RPC protocol shared with adapters
+core/                      # Agent-agnostic algorithm (memory, reward, retrieval, skill, hub, …)
+server/                    # HTTP + SSE server (powers the viewer)
+client/                    # DSH browser bundle (Memory tab, settings)
+viewer/                    # Runtime viewer (Vite, served by server/)
+templates/                 # config.yaml templates copied to the user's home on install
+docs/                      # Developer-facing docs (algorithm, data model, prompts, …)
+scripts/                   # Build / packaging / release helpers
+tests/                     # unit / integration / e2e (vitest)
 ```
 
 For the full structural breakdown read [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Where data lives
 
-Runtime code and user state stay separate. `install.sh` creates the OpenClaw
-and Hermes homes; DSH installs the package into a profile with `dsh plugin`
-and initializes its runtime home on first boot:
-
+Runtime code and user state stay separate. DSH installs the package into a
+profile with `dsh plugin` and initializes its runtime home on first boot:
 
 | Agent | Code installed to | Runtime data + config in |
 | --- | --- | --- |
-| OpenClaw | `~/.openclaw/plugins/memos-local-plugin/` | `~/.openclaw/memos-plugin/` |
-| Hermes | `~/.hermes/plugins/memos-local-plugin/` | `~/.hermes/memos-plugin/` |
 | DeepSeek Harness | Profile dependency managed by `dsh plugin` | `$DSH_HOME/memos-plugin/` (default `~/.dsh/memos-plugin/`) |
-
 
 Inside the runtime folder:
 
@@ -82,89 +81,24 @@ Inside the runtime folder:
 config.yaml      # MemOS core config (includes API keys; chmod 600 when written)
 data/memos.db    # SQLite (L1/L2/L3/Skill/Episode/Feedback/…)
 skills/          # crystallized skill packages
-logs/            # rotating logs (memos.log, error.log, audit.log, llm.jsonl, perf.jsonl, events.jsonl)
-daemon/          # bridge pid/port files
+logs/            # rotating logs (memos.log, error.log, audit.log, …)
 ```
 
-An adapter creates only the directories it uses. DSH runs `MemoryCore` and the
-existing HTTP/SSE Viewer in the DSH Node.js process, without a JSON-RPC bridge
-or sidecar daemon. The Viewer listens on `http://127.0.0.1:18801` by default;
-set `viewerEnabled: false` in the DSH Cordis row to run without that listener.
-DSH still leaves MemOS file logging to the host, so its normal runtime surface
-is an optional `config.yaml`, `data/`, and `skills/` when skills are produced.
+DSH runs `MemoryCore` and the existing HTTP/SSE Viewer in the DSH Node.js
+process, **without** a JSON-RPC bridge or sidecar daemon. The Viewer listens on
+`http://127.0.0.1:18801` by default; set `viewerEnabled: false` in the DSH
+Cordis row to run without that listener.
 
 Uninstalling the plugin does not delete `data/`, `skills/`, `logs/`, or
 `config.yaml`. Startup after an upgrade may migrate the SQLite schema, so back
 up the runtime directory before upgrading.
 
-## Quick start
+## Quick start (DeepSeek Harness)
 
 > [!IMPORTANT]
 > **Do not run `npm install -g @memtensor/memos-local-plugin`.**
-> This is an agent plugin package, not a standalone CLI. A global
-> npm install only downloads the published tarball into your `node_modules`
-> tree; it does not wire OpenClaw, Hermes, or DSH. The tarball ships the built
-> runtime plus the source and metadata required by the agent installers; the
-> `viewer/` source, `website/`, tests, and other development-only files remain
-> in this repository.
-> Use `install.sh` / `install.ps1` for OpenClaw or Hermes. For DeepSeek
-> Harness, use the Unix installer's `--agent dsh` target or DSH's
-> lower-level `dsh plugin` command.
-
-For OpenClaw and Hermes, the installer downloads the package from npm, deploys
-it to the right agent directory, installs production dependencies, writes the
-initial `config.yaml`, and restarts the agent runtime when needed.
-
-From this repository:
-
-```bash
-cd apps/memos-local-plugin
-bash install.sh --version 2.0.0
-```
-
-Or run against the latest published package:
-
-```bash
-bash install.sh
-```
-
-The installer auto-detects OpenClaw and Hermes. In an interactive terminal it
-asks which agent to install for; in non-interactive environments it installs for
-the detected agent(s). To test a local package before publishing, pass the
-tarball path instead of a registry version:
-
-```bash
-npm pack
-bash install.sh --version ./memtensor-memos-local-plugin-1.0.0-beta.1.tgz
-```
-
-For OpenClaw, use the installer for local archives too:
-
-```bash
-bash install.sh --agent openclaw --version ./memtensor-memos-local-plugin-2.0.16-beta.1.tgz
-```
-
-Do not substitute `openclaw plugins install ./package.tgz` for this command:
-that raw-archive path can resolve development-only DeepSeek peer dependencies
-and fail with `ERESOLVE`, including on OpenClaw 2026.9.1 and 2026.9.2.
-The installer stages production dependencies and rebuilds `better-sqlite3`.
-OpenClaw's newer `npm-pack:` path avoids the peer-resolution conflict, but a
-successful managed install alone does not verify native bindings or initialize
-MemOS runtime configuration; the installer above remains the supported setup.
-
-When upgrading OpenClaw itself, migrate retired host configuration with
-`openclaw doctor --fix` before installing MemOS. The MemOS installer removes its
-own legacy `plugins.installs` records, preserves other plugins' old-host records,
-and uses the host CLI for capability consent when available. It does not rewrite
-the host's internal installation database. See
-[the compatibility test results](docs/OPENCLAW-COMPATIBILITY.md) for tested versions
-and limits.
-
-On Windows, run `install.ps1` from PowerShell instead of `install.sh` for
-OpenClaw or Hermes. The DSH one-command target currently supports macOS/Linux;
-Windows users can use DSH's lower-level `dsh plugin` flow.
-
-### DeepSeek Harness
+> This is an agent plugin package, not a standalone CLI. Use DSH's package
+> management (`dsh plugin`) or the installer's `--agent dsh` target.
 
 DSH support is an out-of-tree Cordis bundle. The one-command installer keeps
 DSH in control of its profile while handling pnpm's reviewed native dependency
@@ -187,84 +121,55 @@ build-script package fails closed for manual review; the installer never uses
 
 The temporary pnpm is removed when the installer exits. It is not needed for
 normal `dsh --profile ...` runtime use. Users who later run lower-level
-`dsh plugin` commands directly still need pnpm on `PATH`; install the DSH-pinned
-version persistently with `npm install -g pnpm@11.7.0` if desired.
+`dsh plugin` commands directly still need pnpm on `PATH`; install the
+DSH-pinned version persistently with `npm install -g pnpm@11.7.0` if desired.
 
 To develop from a local checkout instead, build it and add it to the desired
 DSH profile directly:
 
 ```bash
-cd /path/to/MemOS/apps/memos-local-plugin
+cd /path/to/dsh-memos-local
 npm install
-npm run build:package
+npm run build
 dsh plugin --profile web add .
 ```
 
-The adapter reuses the provider/model and credentials already configured in
-DSH for MemOS auxiliary LLM calls by default; no second API key is required.
-For bounded structured helper calls it uses a model-advertised `off` reasoning
-effort when available, without changing the agent conversation's selection.
-An explicit MemOS LLM provider remains available as an override.
+### Memory tab and Viewer in DSH
 
-Every accepted, non-empty direct-user DSH turn performs one automatic recall,
-including greetings; there is no greeting or intent-classification exception,
-and re-entry in the same logical turn is de-duplicated. The query is ordered
-before the source-labeled `memos-local-memory` context, although other DSH
-context contributions can appear between them. Restored sessions and forks
-follow the same per-turn rule, while plugin and tool messages do not
-trigger automatic recall. The model can additionally call `memos_search` for a
-shorter or reformulated lookup.
+The adapter mounts the Viewer (default `127.0.0.1:18801`) at the **`/memos`**
+prefix on **DSH's own web server**, so you can:
 
-Automatic recall and explicit `memos_search` share one absolute deadline:
-`min(recallTimeoutMs, 3000)` ms. The default is 3,000 ms, and configuration may
-shorten but cannot extend this DSH foreground bound. DSH retrieval
-filtering does not retry malformed JSON; malformed output, provider failure,
-or a cancellable timeout falls back to the mechanical
-`safeCutoff` over ranked candidates. With no ranked candidates, automatic
-recall injects nothing and the tool returns an empty result. A completely
-non-cancellable provider hits the hard guard at the same effective deadline;
-automatic recall preserves the original query path, while `memos_search`
-returns an empty result marked `timedOut: true`. DSH awaits `agent/pre-step`,
-so a query bubble can still appear only after that turn's bounded recall, but the
-final order remains query then context. Capture, relation, intent, summaries,
-and embeddings remain background work, and the next turn never waits for the
-previous turn's queue. These DSH-specific policies do not change OpenClaw or
-Hermes behavior.
+- Open the **Memory** tab in the DSH left sidebar — an iframe embedding the
+  same-origin `/memos/` viewer (no Mixed-Content issues).
+- Directly open `https://<your-dsh-domain>/memos/` after logging in to DSH.
 
-After the DSH profile starts, open the existing MemOS Viewer at
-`http://127.0.0.1:18801`. The server shares the adapter's in-process
-`MemoryCore`; it is not a second memory runtime or a sidecar process. The
-Cordis fields `viewerEnabled` and `viewerPort` control whether it starts and
-which port it uses; the shared `config.yaml` field `viewer.bindHost` defaults
-the bind interface to `127.0.0.1`. The DSH Viewer is currently supported for
-local-machine use only and accepts only `localhost` or an IPv4 `127.*`
-loopback address. A normal one-`Ctrl+C`/`SIGINT` or `SIGTERM` restart needs no
-MemOS-specific stop command or port wait: active Viewer SSE streams are closed,
-and a transient busy Viewer port retries in the background.
+The `/memos` reverse proxy is registered on DSH's `webServer` after the Viewer
+starts; it injects `<base href="/memos/">` and a fetch/XHR/EventSource shim so
+the Viewer's absolute `/api/v1/...` paths land on `/memos/api/v1/...`.
 
-See the [DeepSeek Harness adapter guide](./adapters/deepseek-harness/README.md)
-for exact Node compatibility, `DSH_HOME`, restart/uninstall steps, and the
-reviewed pnpm approval flow for native/transitive dependency install scripts,
-Viewer lifecycle, and port-conflict behavior.
+The browser-side **Memory** integration is registered by `client/client.js`:
 
-### Troubleshooting
+| UI | Slot | Description |
+|---|---|---|
+| Main panel | `main` (key=`memos`) | iframe embedding the `/memos/` viewer |
+| Sidebar entry | `sidebar.panellist` (id=`memos`) | "Memory" button alongside conversation/trajectory |
+| Settings | `settings.section` | "Memory (Memos)" config + Viewer status |
 
-**`npm install -g @memtensor/memos-local-plugin` says "not found" or "404".**
-You are likely on an old version of this README, or trying to install the
-package as if it were a standalone CLI. The package is published under the
-`@memtensor` scope on the public npm registry, but it is intended to be pulled
-in by an agent-specific installer, not installed globally. Use
-`bash install.sh` for OpenClaw/Hermes or `dsh plugin` for DSH as shown above.
+> If the memory viewer has password protection enabled, you must enter your
+> viewer password on first open. This is a separate auth from DSH login.
 
-**I cloned this repo and the `web/` or `site/` directory only contains a
-README.md (no `src/`, no `vite.config.ts`, no `index.html`).**
-Those directory names are stale. The runtime viewer source lives in `viewer/`
-(formerly `web/`), and the unfinished marketing-site scaffolding at `site/`
-has been removed entirely. If you see a `web/` or `site/` directory with only
-a README, you are looking at a published npm tarball (which only ships
-`viewer/dist/`), not a fresh `git clone` of this repository. Clone the repo
-to get the full source tree, or just run `install.sh` to deploy the prebuilt
-viewer.
+### Memory retrieval policy (DSH)
+
+- Every accepted, non-empty direct-user DSH turn performs **one automatic
+  recall**, including greetings and restored-session turns.
+- The query is ordered before the source-labeled `memos-local-memory` context.
+- The model can additionally call `memos_search` for a shorter or reformulated
+  lookup.
+- Automatic recall and explicit `memos_search` share one absolute deadline:
+  `min(recallTimeoutMs, 3000)` ms (3,000 ms default; config may shorten but not
+  extend this DSH foreground bound).
+- Capture, relation, intent, summaries, and embeddings are background work; the
+  next turn never waits for the previous turn's queue.
 
 ## Configuration
 
@@ -273,74 +178,28 @@ controls such as `viewerEnabled` and `viewerPort` live in the profile's Cordis
 row; shared Viewer settings such as `viewer.bindHost` remain in `config.yaml`.
 The runtime/config location is resolved in the following priority order:
 
-1. **`MEMOS_HOME` environment variable** — points to the runtime root directory (e.g., `/opt/data/.hermes/memos-plugin`)
-2. **`MEMOS_CONFIG_FILE` environment variable** — points directly to the config file (e.g., `/opt/data/.hermes/memos-plugin/config.yaml`)
-3. **Adapter-specific explicit home** — the DSH Cordis `home` field or the `--home` bridge flag
-4. **`DSH_HOME`** (DSH only) — defaults the DSH memory root to `$DSH_HOME/memos-plugin/`
-5. **Default path** — `~/.hermes/memos-plugin/`, `~/.openclaw/memos-plugin/`, or `~/.dsh/memos-plugin/` based on the agent
+1. **`MEMOS_HOME` environment variable** — points to the runtime root directory
+2. **`MEMOS_CONFIG_FILE` environment variable** — points directly to the config file
+3. **Adapter-specific explicit home** — the DSH Cordis `home` field
+4. **`DSH_HOME`** — defaults the DSH memory root to `$DSH_HOME/memos-plugin/`
+5. **Default path** — `~/.dsh/memos-plugin/`
 
-### Docker Deployment
+## Troubleshooting
 
-When running the daemon in a Docker container, you must explicitly specify the config location if it differs from the default path. There are three ways to do this:
+**`npm install -g @memtensor/memos-local-plugin` says "not found" or "404".**
+You are likely trying to install the package as if it were a standalone CLI.
+It is an agent plugin. Use `dsh plugin` (DSH) as shown above.
 
-#### Option 1: Environment Variable (Recommended)
+**The `web/` or `site/` directory only contains a README.**
+Those directory names are stale; the runtime viewer source lives in `viewer/`.
+If you see them with only a README, you are looking at a published npm tarball,
+not a fresh clone of this repository.
 
-Set `MEMOS_HOME` to point to the runtime directory:
+## Developer documentation
 
-```dockerfile
-ENV MEMOS_HOME=/opt/data/home/.hermes/memos-plugin
-CMD ["node", "bridge.cts", "--agent=hermes", "--daemon"]
-```
+See [docs/](./docs/README.md) — index of algorithm, data model, prompts,
+protocol, logging, and release docs.
 
-#### Option 2: CLI Flag
-
-Pass `--home` directly to the bridge command:
-
-```dockerfile
-CMD ["node", "bridge.cts", "--agent=hermes", "--daemon", "--home=/opt/data/home/.hermes/memos-plugin"]
-```
-
-#### Option 3: Config File Path
-
-Set `MEMOS_CONFIG_FILE` to point directly to the config file:
-
-```dockerfile
-ENV MEMOS_CONFIG_FILE=/opt/data/home/.hermes/memos-plugin/config.yaml
-CMD ["node", "bridge.cts", "--agent=hermes", "--daemon"]
-```
-
-### Example Docker Deployment
-
-For the Hermes Agent Docker image:
-
-```dockerfile
-FROM nousresearch/hermes-agent:latest
-
-# Install memos-local-plugin
-RUN bash -c "$(curl -fsSL https://raw.githubusercontent.com/MemTensor/MemOS/main/apps/memos-local-plugin/install.sh)"
-
-# Set the config location
-ENV MEMOS_HOME=/opt/data/.hermes/memos-plugin
-
-# Start daemon in background, then run Hermes
-CMD node /opt/data/.hermes/plugins/memos-local-plugin/bridge.cts --agent=hermes --daemon && hermes chat
-```
-
-### Troubleshooting
-
-If you see warnings like:
-
-```
-config file not found at /opt/data/.hermes/memos-plugin/config.yaml; using defaults
-```
-
-This means the bridge process is looking in the wrong location. Check:
-
-1. Verify your `config.yaml` exists: `ls -la ~/.hermes/memos-plugin/config.yaml`
-2. Set `MEMOS_HOME` or use `--home` to point to the correct directory
-3. Ensure the path matches the location where `install.sh` created the config
-
-When config is missing, the plugin falls back to defaults (local embedding,
-no LLM provider). Lightweight trace memory still works; LLM-dependent
-reflection and evolution are skipped or degraded until a provider is
-configured.
+See also the [DeepSeek Harness adapter guide](./adapters/deepseek-harness/README.md)
+for exact Node compatibility, `DSH_HOME`, restart/uninstall steps, viewer
+lifecycle, and the reviewed pnpm approval flow.
