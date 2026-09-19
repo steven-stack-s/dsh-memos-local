@@ -25,6 +25,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '只做打包校验, 不真正发布 (建议先跑一次 true)'
+        type: boolean
+        default: true
 
 concurrency:
   group: publish-github-packages
@@ -74,11 +79,20 @@ jobs:
       - name: Publish to GitHub Packages
         # package.json 的 publishConfig.registry 指向 npmjs(主目标),
         # 这里必须显式覆盖回 GitHub Packages。
-        run: npm publish --registry https://npm.pkg.github.com
+        # tag push 一律 dry-run; 手动触发时才看输入 (默认也是 dry-run)。
+        run: |
+          set -eu
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "::notice::dry_run=true —— 只做打包校验, 不发布"
+            npm publish --registry https://npm.pkg.github.com --dry-run
+          else
+            npm publish --registry https://npm.pkg.github.com
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'push' && 'true' || inputs.dry_run }}
 
       - name: Summary
         run: |
-          echo "published: $(node -p "require('./package.json').name + '@' + require('./package.json').version")"
+          echo "package: $(node -p "require('./package.json').name + '@' + require('./package.json').version")"
           echo "view: https://github.com/steven-stack-s?tab=packages"

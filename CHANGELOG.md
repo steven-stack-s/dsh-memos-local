@@ -30,10 +30,16 @@ rejected because it sorts below `2.0.19` and falls out of range matches.
 - **`publish-npmjs.yml` no longer publishes blindly.** A tag push now runs
   `npm publish --dry-run` only; a real publish requires a manual
   `workflow_dispatch` run with `dry_run: false`.
+- **`publish-github-packages.yml` gets the same guard.** Both workflows trigger
+  on `v*` tags, so hardening only the npmjs one left the mirror publishing
+  automatically on every tag push. It now defaults to `--dry-run` too.
 - **Pre-flight version check.** Before publishing, the workflow queries the
   registry and fails fast if the version is already used — including versions
   that were unpublished but remain tombstoned in `time`. The previous failure
-  mode (`400` after a full build) is now caught before the build.
+  mode (`400` after a full build) is now caught before the build. It uses Node
+  `fetch` rather than `curl` and fails closed: an initial `curl ... || echo '{}'`
+  version silently passed every version when `curl` was absent, which is worse
+  than no guard at all.
 - Both workflows normalize the `-` in the tag back to `+` when comparing
   against `package.json.version`.
 
