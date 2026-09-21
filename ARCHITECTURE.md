@@ -12,27 +12,28 @@ docs/test infrastructure.
 
 ## 1. Goals & non-negotiables
 
-1. **Agent-agnostic algorithm core.** `core/` must not know what an "OpenClaw
-   conversation turn" or a "Hermes Provider call" looks like. Adapters are the
-   only place agent-specific concepts live.
+1. **Agent-agnostic algorithm core.** `core/` must not know what a "DeepSeek
+   Harness conversation turn" looks like. Adapters are the only place
+   agent-specific concepts live. Upstream MemOS ships OpenClaw and Hermes
+   adapters; this fork keeps only the DSH one (see §3.5).
 2. **Source ↔ runtime separation.** Source code lives only inside this
    directory. User data + core config live only in the runtime home resolved
    through `core/config/paths.ts`, including DSH's `$DSH_HOME/memos-plugin/`.
 3. **YAML is the only core config.** No `.env`. Sensitive fields (API keys,
-   tokens) live in `config.yaml`; the OpenClaw/Hermes installer and config
-   writer use owner-only permissions. DSH host knobs live in its Cordis YAML.
+   tokens) live in `config.yaml`, written by the config writer with owner-only
+   permissions. DSH host knobs live in its Cordis YAML.
 4. **Logs are first-class where the plugin owns logging.** Standalone and
    server-backed deployments use structured, channelled, rotating sinks.
    Embedded adapters leave logging to the host; DSH starts no MemOS file sink.
 5. **Algorithm is the spec.** All math (γ, α, V, η, support, gain) is named the
    same in code, docs, and prompts as in the algorithm spec.
-6. **Three adapters, one core.** OpenClaw and DeepSeek Harness use in-process
-   TypeScript adapters that import `core/` directly. Hermes is Python, so it
-   speaks JSON-RPC to the shared `bridge.cts`.
-7. **Frontend is verifiable where mounted.** Server-backed adapters expose
-   algorithm events in the viewer. `docs/FRONTEND-VALIDATION.md` documents the
-   deterministic "say X → see Y" checks. DSH mounts the existing Viewer from
-   the same process by default, on loopback port `18801`.
+6. **One adapter, one core.** This fork keeps a single in-process TypeScript
+   adapter (`adapters/deepseek-harness/`) that imports `core/` directly.
+   Upstream additionally ships OpenClaw (in-process TS) and Hermes (Python over
+   JSON-RPC `bridge.cts`); neither exists here.
+7. **Frontend is verifiable where mounted.** The adapter exposes algorithm
+   events in the viewer. DSH mounts the existing Viewer from the same process
+   by default, on loopback port `18801`.
 
 ---
 
@@ -41,19 +42,19 @@ docs/test infrastructure.
 ```
                 ┌────────────────────────────────────────────────┐
                 │                  Agent host                    │
-                │  (OpenClaw / DeepSeek Harness / Hermes / …)    │
-                └────────────────┬─────────────┬─────────────────┘
-                                 │             │
-                  in-process     │             │     stdio / TCP JSON-RPC
-                  TypeScript     ▼             ▼
-                ┌──────────────────────┐   ┌──────────────────────┐
-                │ adapters/openclaw/ + │   │ adapters/hermes/     │
-                │ deepseek-harness/    │   │  - memos_provider    │
-                │  - in-process hooks  │   │  - bridge_client     │
-                │  - tools / lifecycle │   │  - daemon_manager    │
-                └──────────┬───────────┘   └──────────┬───────────┘
-                           │                          │
-                           ▼                          ▼
+                │            (DeepSeek Harness)                  │
+                └────────────────┬───────────────────────────────┘
+                                 │
+                  in-process     │
+                  TypeScript     ▼
+                ┌──────────────────────────────────────┐
+                │      adapters/deepseek-harness/      │
+                │  - Cordis bundle + lifecycle hooks   │
+                │  - turn correlation (bridge.ts)      │
+                │  - tools / host LLM / viewer proxy   │
+                └──────────────────┬───────────────────┘
+                                   │
+                                   ▼
                  ┌────────────────────────────────────────────┐
                  │           agent-contract/                  │
                  │  MemoryCore type · events · errors · DTO   │
@@ -66,28 +67,32 @@ docs/test infrastructure.
         │                                                              │
         │  pipeline/orchestrator + memory-core   ← single facade       │
         │      ├── session/        ├── capture/      ├── reward/       │
-        │      ├── memory/l1/l2/l3 ├── episode/      ├── feedback/     │
+        │      ├── memory/l1/l2/l3 ├── episode/*     ├── feedback/     │
         │      ├── skill/          ├── retrieval/    ├── hub/          │
-        │      ├── telemetry/      └── update-check/                   │
+        │      └── telemetry/                                          │
         │                                                              │
         │  shared infra: storage · embedding · llm · logger · config   │
-        └────────────┬───────────────────────────┬─────────────────────┘
-                     │                           │
-                     ▼                           ▼
-            ┌──────────────────┐        ┌──────────────────┐
-            │   server/ (HTTP) │        │   bridge.cts     │
-            │   /api · /events │        │   JSON-RPC daemon │
-            │   serves viewer/ │        │   used by Hermes  │
-            │       dist       │        │                   │
-            └────────┬─────────┘        └──────────────────┘
-                     │
-                     ▼
-            ┌──────────────────────────┐
-            │      viewer/             │
-            │  Overview · Traces · …   │
-            │  Logs · Settings · …     │
-            └──────────────────────────┘
+        └────────────────────────────┬─────────────────────────────────┘
+                                     │
+                                     ▼
+                          ┌──────────────────────┐
+                          │   server/ (HTTP/SSE) │
+                          │   /api · /events     │
+                          │   serves viewer/dist │
+                          └──────────┬───────────┘
+                                     │
+                                     ▼
+                          ┌──────────────────────────┐
+                          │      viewer/             │
+                          │  Overview · Traces · …   │
+                          │  Logs · Settings · …     │
+                          └──────────────────────────┘
 ```
+
+`core/episode/` and `core/update-check/` are documented placeholders, not
+implementation modules — each directory holds only a README explaining why
+its code lives elsewhere. See §3.2.
+
 
 ---
 
@@ -142,7 +147,8 @@ Algorithm modules:
 
 ### 3.3 `server/`
 
-Thin HTTP/SSE shell over `MemoryCore`. Routes mirror the viewer's needs:
+Thin HTTP/SSE shell over `MemoryCore`. Routes mirror the viewer's needs (the
+list below is representative, not exhaustive — see `server/routes/`):
 
 ```
 GET    /api/system          version, paths, health
@@ -159,24 +165,23 @@ GET    /api/logs/tail       channelled, paginated, with `?level=&channel=&limit=
 GET    /events              SSE: every CoreEvent + every log line (after redact)
 ```
 
-### 3.4 `bridge.cts` + `bridge/`
+### 3.4 Upstream-only surface (not in this fork)
 
-A long-lived JSON-RPC server (stdio + TCP modes). Method names live in
-`agent-contract/jsonrpc.ts`. Hermes' Python `bridge_client.py` is its only
-heavyweight client today.
+The upstream monorepo also ships an OpenClaw in-process adapter
+(`adapters/openclaw/`), a Python Hermes adapter (`adapters/hermes/`,
+`memos_provider/*.py`), and the long-lived JSON-RPC `bridge.cts` (stdio + TCP)
+that Hermes spoke to. **None of them exist here** — they were pruned when this
+fork narrowed to DeepSeek Harness.
 
-### 3.5 `adapters/openclaw/`
+Two consequences worth knowing:
 
-Standard OpenClaw plugin. Imports `core/` directly. Provides:
+- `agent-contract/jsonrpc.ts` still declares the JSON-RPC envelope and method
+  names, because the DSH adapter shares those DTOs. Nothing in this fork acts
+  as a JSON-RPC *server*.
+- The upstream `install.sh` / `install.ps1` entry points are likewise gone;
+  installation is `dsh plugin` only (see `adapters/deepseek-harness/README.md`).
 
-- `plugin.ts` — `definePluginEntry` wiring; passes config + paths into `createMemoryCore`.
-- `tools.ts` — `memos_search`, `memos_get`, `memos_timeline` tool definitions.
-- `hooks.ts` — `onConversationTurn`, `onShutdown`, etc.
-- `host-llm-bridge.ts` — when `llm.fallback_to_host: true`, route LLM calls
-  through the OpenClaw host's LLM rather than failing.
-- `openclaw.plugin.json` — the host plugin manifest.
-
-### 3.6 `adapters/deepseek-harness/`
+### 3.5 `adapters/deepseek-harness/`
 
 Native Cordis plugin installed as an out-of-tree DSH bundle. It imports
 `MemoryCore` directly and provides:
@@ -231,9 +236,9 @@ cannot be cancelled immediately, automatic recall preserves the original
 pre-step decision and `memos_search` returns an empty result marked
 `timedOut: true`; the late work may still finish warming the shared cache.
 
-This per-turn recall, deadline, and malformed-output policy is adapter-scoped.
-OpenClaw and Hermes retain their existing foreground ordering, retrieval, and
-retry behavior.
+This per-turn recall, deadline, and malformed-output policy is adapter-scoped:
+it applies to the DSH adapter only. Upstream's OpenClaw and Hermes adapters
+keep their own foreground ordering, retrieval, and retry behavior.
 
 When `viewerEnabled` is true, the adapter starts the shared HTTP/SSE server
 against its in-process core and serves the packaged Viewer on
@@ -241,8 +246,7 @@ against its in-process core and serves the packaged Viewer on
 work, closes the server, then attempts a bounded, best-effort drain of the
 adapter bridge before shutting down the core. The DSH adapter opts into
 active-SSE termination during server close so an open Viewer tab cannot consume
-DSH's bounded disposal window; OpenClaw and Hermes retain their existing
-default drain policy. The Viewer and plugin have no independent process and
+DSH's bounded disposal window. The Viewer and plugin have no independent process and
 exit with DSH. A transient
 `EADDRINUSE` during a quick restart gets a finite background retry, so ordinary
 one-`Ctrl+C` restart flows require no special wait or shutdown command. It
@@ -261,29 +265,17 @@ can leave background work unfinished. Because DSH does not replay the original
 `session/event` stream after restart and MemOS has no durable host receipt,
 such a turn can remain uncaptured.
 
-### 3.7 `adapters/hermes/`
+### 3.6 `viewer/`
 
-Python package. Implements Hermes' `MemoryProvider` interface and proxies to
-`bridge.cts`:
+Vite app, served at runtime by `server/middleware/static.ts`. Ten views map 1:1
+to the algorithm's observable surface:
 
-- `memos_provider/provider.py` — `MemoryProvider` impl.
-- `memos_provider/bridge_client.py` — async JSON-RPC client.
-- `memos_provider/daemon_manager.py` — start/stop/health-check the bridge.
-- `memos_provider/config_loader.py` — read `~/.hermes/memos-plugin/config.yaml`.
-- `memos_provider/log_forwarder.py` — forward Python-side logs back over the
-  bridge so everything ends up in the same `logs/` directory.
-
-### 3.8 `viewer/`
-
-Vite app, served at runtime by `server/static.ts`. Ten views map 1:1 to the
-algorithm's observable surface:
-
-The well-known defaults are OpenClaw `18799`, Hermes `18800`, and DeepSeek
-Harness `18801`. DSH defaults the Viewer to loopback and allows its port to be
+DSH defaults the Viewer to loopback port `18801` and allows the port to be
 overridden in the Cordis row; the shared core `viewer.bindHost` setting owns
-the bind interface. The current DSH adapter supports local-machine Viewer use
-only: it does not pass an HTTP API key to the server, so it accepts only
-`localhost` or IPv4 `127.*` and rejects non-loopback binding.
+the bind interface. (Upstream reserves `18799` for OpenClaw and `18800` for
+Hermes; neither is used here.) The current DSH adapter supports local-machine
+Viewer use only: it does not pass an HTTP API key to the server, so it accepts
+only `localhost` or IPv4 `127.*` and rejects non-loopback binding.
 
 | View         | Purpose                                                       |
 |--------------|---------------------------------------------------------------|
@@ -298,27 +290,27 @@ only: it does not pass an HTTP API key to the server, so it accepts only
 | Logs         | Channelled, level-filtered, real-time + tail                  |
 | Settings     | Config editor (writes back to `config.yaml`)                  |
 
-### 3.9 `templates/`
+### 3.7 `templates/`
 
-Plain files copied — never edited at runtime — by `install.sh`:
+Plain files, copied into the user's runtime home by an installer and **never
+edited at runtime** — the plugin always reads the actual user files.
 
-- `config.openclaw.yaml`
-- `config.hermes.yaml`
-- `README.user.md`
+In this fork the upstream `install.sh` / `install.ps1` are gone, so nothing
+copies them automatically; the directory holds the user-facing README plus a
+note on the upstream templates:
 
-### 3.10 `docs/`
+- `README.user.md` — the user-facing guide copied to `~/.<agent>/memos-plugin/`.
+- `README.md` — documents the upstream `config.openclaw.yaml` /
+  `config.hermes.yaml` / `config.demo.yaml` templates. **Those template files
+  are not in this fork** — with a single DSH adapter there is no per-agent
+  config template to ship, and `core/config/schema.ts` is the source of truth
+  for defaults.
 
-Developer-facing docs:
+### 3.8 `docs/`
 
-- `ALGORITHM.md` — the V7 spec, restated and indexed against the code.
-- `DATA-MODEL.md` — every table, every column, every index.
-- `EVENTS.md` — full event catalogue with payload shape.
-- `PROMPTS.md` — prompt anatomy + evaluation samples.
-- `BRIDGE-PROTOCOL.md` — JSON-RPC method list + error semantics.
-- `ADAPTER-AUTHORING.md` — how to add a new agent adapter.
-- `LOGGING.md` — channel taxonomy + redaction + retention.
-- `FRONTEND-VALIDATION.md` — scripted "say X → expect Y" checklists.
-- `RELEASE-PROCESS.md` — versioning + release-note workflow.
+Developer-facing docs. The index lives in `docs/README.md`; the current
+contents are algorithm, data-model, config, logging, prompt-injection, viewer,
+and RFC documents.
 
 ---
 
@@ -327,12 +319,11 @@ Developer-facing docs:
 ### 4.1 Golden rule: when do we retrieve?
 
 The V7 spec is explicit about **injection timing, not quantity.** Translated
-to this codebase, the composite row is the OpenClaw/Hermes path; DSH has an
-explicit row because its ordering and lifecycle differ:
+to this codebase, DSH is the only adapter, so every row below is the DSH path;
+the rows differ by *trigger*, not by agent:
 
 | Trigger                                      | Public adapter call / internal path                                      | Where it lands                            |
 |----------------------------------------------|--------------------------------------------------------------------------|-------------------------------------------|
-| OpenClaw/Hermes composite user turn arrives | `MemoryCore.onTurnStart` → `turnStartRetrieve` (normally Tier-1+2+3)      | Prepended as `memos_context` to this turn |
 | DSH accepted, non-empty direct-user turn    | `MemoryCore.searchMemory({ reason: "turn_start" })` → `turnStartRetrieve` | Appended after the direct query; other DSH context may intervene |
 | LLM asks for `memos_search`                  | `MemoryCore.searchMemory` → `toolDrivenRetrieve` (Tier-2 + optional Tier-3; no Tier-1) | Returned as the tool result |
 | LLM asks for `memos_timeline`                | `MemoryCore.timeline` (ordered storage query; no embedding or ranking)   | Returned as the tool result               |
@@ -378,10 +369,10 @@ their host's prompt shape.
 
 ### 4.2 Happy path
 
-The diagram below is specifically the OpenClaw/Hermes composite
-`onTurnStart()` path. DeepSeek Harness does not follow its intent-before-recall
-ordering: as described in §3.6, every accepted direct-user DSH turn awaits only
-its own bounded retrieval/context assembly. DSH moves
+The diagram below shows the composite `onTurnStart()` path as upstream's
+OpenClaw/Hermes adapters drove it. DeepSeek Harness does not follow its
+intent-before-recall ordering: as described in §3.5, every accepted direct-user
+DSH turn awaits only its own bounded retrieval/context assembly. DSH moves
 relation/intent/episode routing followed by capture to the per-session
 background queue, and the next turn never joins that earlier work.
 
@@ -461,8 +452,8 @@ onToolResult (success=false) ──▶ feedback.signals.bumpFailure(toolId)
 ```
 
 The stash lives in memory only, keyed by session+conversation; if the user
-abandons the session it's dropped. This is why `onToolCall`/`onToolResult` in
-the OpenClaw SDK are sufficient without any SDK changes.
+abandons the session it's dropped. This is why observing tool calls/results
+requires no host-SDK change.
 
 ### 4.4 Observability
 
@@ -508,23 +499,28 @@ See `docs/LOGGING.md` for the full taxonomy. Highlights:
 |--------------|-----------------------|--------------------------------------------------------------------|
 | Unit         | `tests/unit/`         | One module at a time, in-memory + fakes.                           |
 | Integration  | `tests/integration/`  | Multiple core modules + real SQLite in tmp dir.                    |
-| End-to-end   | `tests/e2e/`          | Spin up bridge + server + (mocked) adapter; assert events / files. |
+| End-to-end   | `tests/e2e/`          | Spin up server + (mocked) adapter; assert events / files.           |
 
 Common helpers:
 
 - `tests/helpers/tmp-home.ts` — creates a throwaway `~/.<agent>/memos-plugin/`.
+- `tests/helpers/tmp-db.ts` — a throwaway SQLite database.
 - `tests/helpers/fake-llm.ts` — deterministic LLM responses keyed by prompt id.
 - `tests/helpers/fake-embedder.ts` — deterministic vectors.
-- `tests/fixtures/*.json` — canonical traces / policies / episodes / feedbacks.
+- `tests/fixtures/` — reserved for canonical traces / policies / episodes /
+  feedbacks; currently empty (kept by `.gitkeep`), so tests build their own
+  inputs via the helpers above.
 
 ---
 
 ## 7. Release & versioning
 
-- SemVer.
+- Versioning is `<upstream version>-dsh.<n>` — see the README's version policy
+  section for why the prerelease segment is used instead of build metadata.
 - `CHANGELOG.md` at the project root is hand-maintained per release.
-- `core/update-check/` lets the running plugin notify users when a newer npm
-  version is available.
+- Automated update checking is **not implemented** in this fork: the check was
+  dropped with the non-DSH adapters, and `core/update-check/README.md` records
+  what must change before it can be restored under the current version policy.
 
 ---
 

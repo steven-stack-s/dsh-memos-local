@@ -207,9 +207,7 @@ the right time.
 ## Layout (high-level)
 
 ```
-adapters/deepseek-harness/ # DSH Cordis plugin (server) — this fork's DSH entry
-adapters/openclaw/         # In-process TS adapter for OpenClaw (kept from upstream)
-adapters/hermes/           # Python adapter talking to bridge.cts (kept from upstream)
+adapters/deepseek-harness/ # DSH Cordis plugin (server) — this fork's only adapter
 agent-contract/            # Stable types + JSON-RPC protocol shared with adapters
 core/                      # Agent-agnostic algorithm (memory, reward, retrieval, skill, hub, …)
 server/                    # HTTP + SSE server (powers the viewer)

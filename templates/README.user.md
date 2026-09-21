@@ -11,7 +11,6 @@ config.yaml      # all configuration (including API keys); chmod 600
 data/            # SQLite database, vector blobs
 skills/          # crystallized skill packages (one per directory)
 logs/            # rotating logs (memos.log, error.log, audit.log, llm.jsonl, perf.jsonl, events.jsonl)
-daemon/          # bridge pid/port files (auto-managed)
 ```
 
 ## Editing your config
@@ -32,9 +31,10 @@ so only your user can read it.
 
 ## Multiple agents on the same machine
 
-Each agent has its own home directory (e.g. `~/.openclaw/memos-plugin/` and
-`~/.hermes/memos-plugin/`). They never share data unless you explicitly
-configure team sharing in `config.yaml`'s `hub:` section.
+Each agent has its own home directory (for DeepSeek Harness,
+`$DSH_HOME/memos-plugin/`, default `~/.dsh/memos-plugin/`). Memories are not
+shared between agents unless you explicitly configure team sharing in
+`config.yaml`'s `hub:` section.
 
 ## Need help?
 

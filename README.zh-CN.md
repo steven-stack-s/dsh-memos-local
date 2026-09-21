@@ -195,9 +195,7 @@ git subtree merge --squash -P . upstream/<branch>
 ## 目录结构（概览）
 
 ```
-adapters/deepseek-harness/ # DSH 的 Cordis 插件（服务端）——本 fork 的 DSH 入口
-adapters/openclaw/         # OpenClaw 进程内 TS 适配器（保留上游源码）
-adapters/hermes/           # 经 bridge.cts 通信的 Python 适配器（保留上游源码）
+adapters/deepseek-harness/ # DSH 的 Cordis 插件（服务端）——本 fork 唯一的适配器
 agent-contract/            # 与各适配器共享的稳定类型与 JSON-RPC 协议
 core/                      # 与智能体无关的核心算法（记忆、奖励、检索、技能…）
 server/                    # HTTP + SSE 服务（驱动 viewer）
