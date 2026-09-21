@@ -32,10 +32,10 @@ export function registerDiagRoutes(routes: Routes, deps: ServerDeps): void {
     const core = deps.core;
     const [traces, episodes, policies, worldModels, skills, logs] =
       await Promise.all([
-        core.listTraces({ limit: 1, offset: 0 }),
+        core.listTraces({ limit: 1, offset: 0, includeAllNamespaces: true }),
         core.listEpisodeRows({ limit: 1, offset: 0, includeAllNamespaces: true }),
         core.listPolicies({ limit: 1, offset: 0, includeAllNamespaces: true }),
-        core.listWorldModels({ limit: 1, offset: 0 }),
+        core.listWorldModels({ limit: 1, offset: 0, includeAllNamespaces: true }),
         core.listSkills({ limit: 1, includeAllNamespaces: true }),
         core.listApiLogs({ limit: 1, offset: 0 }),
       ]);
@@ -61,7 +61,7 @@ export function registerDiagRoutes(routes: Routes, deps: ServerDeps): void {
       deps.core.listTraces({ limit: 200, offset: 0, includeAllNamespaces: true }),
       deps.core.listEpisodeRows({ limit: 200, offset: 0, includeAllNamespaces: true }),
       deps.core.listPolicies({ limit: 200, offset: 0, includeAllNamespaces: true }),
-      deps.core.listWorldModels({ limit: 200, offset: 0 }),
+      deps.core.listWorldModels({ limit: 200, offset: 0, includeAllNamespaces: true }),
       deps.core.listSkills({ limit: 200, includeAllNamespaces: true }),
     ]);
     const namespaces = new Map<string, { agentKind: string; profileId: string; count: number }>();
@@ -160,7 +160,7 @@ async function countPolicies(core: ServerDeps["core"]): Promise<number> {
 }
 async function countWorldModels(core: ServerDeps["core"]): Promise<number> {
   return walkAll((limit, offset) =>
-    core.listWorldModels({ limit, offset }),
+    core.listWorldModels({ limit, offset, includeAllNamespaces: true }),
   );
 }
 async function countSkills(core: ServerDeps["core"]): Promise<number> {

@@ -71,6 +71,20 @@ export interface Config {
 
 export const Config: Schema<Config> = Schema.object({
   enabled: Schema.boolean().default(true),
+  // Fallback namespace only: a non-empty session `agentPreset` overrides
+  // this for every turn (see bridge.ts / tools.ts `namespaceFor`). It is
+  // used at bootstrap — before any turn has run — and for sessions with no
+  // `agentPreset`.
+  //
+  // Keep it consistent with the `agentPreset` values you actually use:
+  // bootstrap seeds the core's initial namespace from this string, so if it
+  // disagrees with the profile that owns the rows, namespace-scoped reads
+  // see nothing until the first turn flips the namespace. That mismatch is
+  // what made the viewer's lists look empty while its counts were non-zero
+  // (#2131); the viewer routes now pin `includeAllNamespaces` so they no
+  // longer depend on it, but other consumers still do. `/api/v1/diag/namespace`
+  // reports the active namespace and every namespace present in the DB, so
+  // you can check for a mismatch instead of guessing.
   profileId: Schema.string().default("default"),
   home: Schema.string().default(""),
   recallEnabled: Schema.boolean().default(true),
@@ -312,6 +326,36 @@ export async function apply(
       initLogging: false,
     });
     await core.init();
+
+    // Startup namespace check. The core's active namespace is seeded from
+    // `config.profileId` above and only gets flipped once a turn runs with
+    // a session `agentPreset`. If the configured fallback disagrees with
+    // the profile that actually owns the rows, every namespace-scoped read
+    // returns nothing until that first turn — which is exactly how the
+    // viewer used to show non-zero Overview counts above empty panels
+    // (#2131). The viewer routes are fixed, but other consumers still
+    // scope by namespace, so surface the mismatch instead of failing
+    // silently. Best-effort: never block startup on a diagnostic.
+    try {
+      const health = await core.health();
+      const bootProfile = health.namespace?.profileId;
+      const owned = await core.listEpisodeRows({
+        limit: 1,
+        offset: 0,
+        includeAllNamespaces: true,
+      });
+      const dbProfile = owned[0]?.ownerProfileId;
+      if (bootProfile && dbProfile && bootProfile !== dbProfile) {
+        ctx.logger.warn(
+          `memos-local-memory: namespace mismatch — configured profileId "${bootProfile}" ` +
+            `but the database's rows are owned by "${dbProfile}". Namespace-scoped reads ` +
+            `will return nothing until the first turn flips the active namespace. ` +
+            `Set config.profileId to "${dbProfile}" (or the agentPreset you use) to align them.`,
+        );
+      }
+    } catch {
+      /* diagnostic only — ignore */
+    }
 
     if (config.viewerEnabled) {
       const viewerHost = memoryConfig.viewer.bindHost;

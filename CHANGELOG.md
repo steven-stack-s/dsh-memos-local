@@ -3,6 +3,62 @@
 Notable changes to `dsh-memos-local`. Maintained by hand; for the full
 per-commit history use `git log` or the GitHub releases page.
 
+## [v2.0.19-dsh.3]
+
+### Changed — publishing split: GitHub Packages is automatic, npmjs is manual
+
+A tag push now **really publishes to GitHub Packages** and still only
+*dry-runs* npmjs. Previously both were dry-run on tags, so the GHP mirror
+silently fell behind — it stopped at `2.0.19-dsh.1` while npmjs had
+`2.0.19-dsh.2`, and the profile had to be installed by hand.
+
+The asymmetry is deliberate:
+
+- **GitHub Packages — automatic.** Re-publishing an existing version returns a
+  conflict instead of consuming the version number, so a mistake is cheap to
+  retry. It is the mirror, so it should follow a tag with no human in the loop.
+- **npmjs — manual.** A version number is burned the moment it is used:
+  `unpublish` deletes the artifacts but leaves a tombstone in the packument's
+  `time` table, and every later publish of that number fails with
+  `400 Cannot publish over previously published version`. A bad publish cannot
+  be undone, so it keeps requiring an explicit `workflow_dispatch` with
+  `dry_run: false`.
+
+Both workflows still verify the tag equals `v` + `package.json.version`, and
+GHP keeps its `workflow_dispatch` entry (defaulting to dry-run) for rehearsals
+and manual re-mirroring.
+
+### Fixed — /diag probes followed the turn-scoped namespace
+
+`GET /api/v1/diag/counts` and `GET /api/v1/diag/namespace` still scoped their
+world-model reads to the active namespace. `/diag/counts` was the worse case:
+it used `listWorldModels({ limit: 1 })` as a cheap "is there anything?" probe
+and short-circuited the real count to `0` when the probe came back empty —
+so a namespace mismatch made the diagnostic report an empty database while
+the database was full. Both endpoints now pin `includeAllNamespaces: true`,
+like the rest of the viewer surface (#2131).
+
+### Changed — the profileId mismatch is now diagnosed instead of silent
+
+`profileId` is only a *fallback*: a non-empty session `agentPreset` overrides
+it for every turn. It still seeds the core's namespace at bootstrap, so when it
+disagrees with the profile that owns the rows, namespace-scoped reads return
+nothing until the first turn flips the namespace — the root cause of the empty
+panels above.
+
+The schema entry now documents that contract, and startup compares the
+configured `profileId` against the owner of the rows in the database and warns
+on a mismatch:
+
+```
+namespace mismatch — configured profileId "default" but the database's rows are
+owned by "standard". Namespace-scoped reads will return nothing until the first
+turn flips the active namespace. Set config.profileId to "standard" (or the
+agentPreset you use) to align them.
+```
+
+Best-effort only: the probe never blocks startup.
+
 ## [v2.0.19-dsh.2]
 
 ### Fixed — Viewer panels showed no data while the Overview counts did

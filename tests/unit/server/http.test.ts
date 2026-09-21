@@ -570,6 +570,29 @@ describe("HTTP server — REST routes", () => {
     );
   });
 
+  it("pins the /diag probes to all-namespace reads too (#2131)", async () => {
+    // The diagnostic endpoints are the tool operators reach for when the
+    // viewer looks wrong, so they must report the whole database rather
+    // than the turn-scoped namespace. Worst case was /diag/counts: it
+    // used `listXxx({limit: 1})` as a cheap "is there anything?" probe
+    // and short-circuited the real count to 0 when the probe returned
+    // nothing — so a namespace mismatch made the probe report zero rows
+    // while the database was full, sending diagnosis in the wrong
+    // direction entirely.
+    await fetch(`${handle.url}/api/v1/diag/counts`);
+    expect(core.listTraces).toHaveBeenCalledWith(
+      expect.objectContaining({ includeAllNamespaces: true }),
+    );
+    expect(core.listWorldModels).toHaveBeenCalledWith(
+      expect.objectContaining({ includeAllNamespaces: true }),
+    );
+
+    await fetch(`${handle.url}/api/v1/diag/namespace`);
+    expect(core.listWorldModels).toHaveBeenCalledWith(
+      expect.objectContaining({ includeAllNamespaces: true }),
+    );
+  });
+
   it("pins the Skills / Experiences / Environment-knowledge panels to all-namespace reads (#2131)", async () => {
     // Regression: the Overview cards pin every count to
     // `includeAllNamespaces: true`, but the three panels behind them

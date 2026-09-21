@@ -3,10 +3,10 @@ export function registerDiagRoutes(routes, deps) {
     routes.set("GET /api/v1/diag/counts", async () => {
         const core = deps.core;
         const [traces, episodes, policies, worldModels, skills, logs] = await Promise.all([
-            core.listTraces({ limit: 1, offset: 0 }),
+            core.listTraces({ limit: 1, offset: 0, includeAllNamespaces: true }),
             core.listEpisodeRows({ limit: 1, offset: 0, includeAllNamespaces: true }),
             core.listPolicies({ limit: 1, offset: 0, includeAllNamespaces: true }),
-            core.listWorldModels({ limit: 1, offset: 0 }),
+            core.listWorldModels({ limit: 1, offset: 0, includeAllNamespaces: true }),
             core.listSkills({ limit: 1, includeAllNamespaces: true }),
             core.listApiLogs({ limit: 1, offset: 0 }),
         ]);
@@ -31,7 +31,7 @@ export function registerDiagRoutes(routes, deps) {
             deps.core.listTraces({ limit: 200, offset: 0, includeAllNamespaces: true }),
             deps.core.listEpisodeRows({ limit: 200, offset: 0, includeAllNamespaces: true }),
             deps.core.listPolicies({ limit: 200, offset: 0, includeAllNamespaces: true }),
-            deps.core.listWorldModels({ limit: 200, offset: 0 }),
+            deps.core.listWorldModels({ limit: 200, offset: 0, includeAllNamespaces: true }),
             deps.core.listSkills({ limit: 200, includeAllNamespaces: true }),
         ]);
         const namespaces = new Map();
@@ -116,7 +116,7 @@ async function countPolicies(core) {
     return walkAll((limit, offset) => core.listPolicies({ limit, offset, includeAllNamespaces: true }));
 }
 async function countWorldModels(core) {
-    return walkAll((limit, offset) => core.listWorldModels({ limit, offset }));
+    return walkAll((limit, offset) => core.listWorldModels({ limit, offset, includeAllNamespaces: true }));
 }
 async function countSkills(core) {
     return walkAll((limit, offset) => core.listSkills({ limit, includeAllNamespaces: true }));

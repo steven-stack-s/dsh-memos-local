@@ -5,9 +5,16 @@
 #   npm install @steven-stack-s/dsh-memos-local
 #   dsh plugin --profile web add @steven-stack-s/dsh-memos-local
 #
-# 触发方式:
+# 触发方式 (npmjs 是【人工确认】渠道, 与 GHP 的自动镜像相反):
 #   - push tag  v*        → 校验通过后 **dry-run 打包**(不真正发布)
 #   - workflow_dispatch   → 手动发布; dry_run 默认 true, 需显式关闭才真正发布
+#
+# 为什么 npm 必须人工确认: 版本号一经使用即永久作废 —— unpublish 只删除产物,
+# packument 的 time 表会留下墓碑, 之后任何同号发布都被拒
+# (400 Cannot publish over previously published version)。误发无法回收,
+# 所以这里坚持"推 tag 只校验, 手动 dispatch 才真发布"。
+# GitHub Packages 那条则是自动的(见 publish-github-packages.yml):
+# 重复发布会返回冲突而非消耗版本号, 出错代价低。
 #
 # 认证: 需要仓库 Secret —— 名字用 `NPM_TOKEN` 或 `NPM` 均可(workflow 两者兼容)。
 #       去 npmjs.com 生成 **Granular Access Token** 并勾选 **Bypass 2FA**
