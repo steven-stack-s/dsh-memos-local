@@ -1,6 +1,6 @@
 {
   "name": "@steven-stack-s/dsh-memos-local",
-  "version": "2.0.19-dsh.3",
+  "version": "2.0.19-dsh.4",
   "description": "Reflect2Evolve memory plugin: layered L1/L2/L3 memory, reflection-weighted value backprop, cross-task policy induction, skill crystallization, and three-tier retrieval for OpenClaw, Hermes Agent, and DeepSeek Harness.",
   "repository": {
     "type": "git",

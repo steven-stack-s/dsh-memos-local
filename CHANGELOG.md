@@ -3,6 +3,51 @@
 Notable changes to `dsh-memos-local`. Maintained by hand; for the full
 per-commit history use `git log` or the GitHub releases page.
 
+## [v2.0.19-dsh.4]
+
+### Fixed — the summary and skill-evolver model cards reported "Not configured"
+
+The overview model cards showed **未配置 / Not configured** for the summary
+model and the skill-evolver model even though both slots were healthy and
+actively serving. They also carried a red dot with
+
+```
+llm_output_malformed: DeepSeek Harness host LLM reached the token cap before completing
+```
+
+Two separate defects were behind that one screenshot.
+
+**1. A host-managed slot is not an unconfigured slot.** The DSH host bridge
+deliberately leaves `llm.model` empty — the *host* owns the model choice, so
+there is no name for `config.yaml` to carry. The card rendered
+`model || t("...unconfigured")`, so an empty name fell straight through to the
+"Not configured" placeholder. The placeholder logic now lives in
+`displayModelName()` and distinguishes the three real cases: a configured
+name wins, a `provider: "host"` slot reads "Managed by DSH host" /
+"由 DSH 宿主托管", and only a slot with nothing configured keeps the
+"Not configured" wording.
+
+**2. The token budget was too small for structured output.** `llm.maxTokens`
+defaulted to **1024**, but that slot does not only summarise — it also carries
+the structured-JSON calls (reflection synthesis, alpha scoring, L3
+abstraction). A reasoning model spends output tokens *before* it emits any
+JSON, so the budget was regularly exhausted mid-object and surfaced as the
+`reached the token cap` error above. The default is now **2048**, kept
+deliberately at half of the `l3Llm` / `skillEvolver` budget (4096) because
+this slot sits on the turn path, where latency and cost matter more. Explicit
+`maxTokens` overrides are unaffected, and the schema's real floor is
+unchanged at 100.
+
+The skill-evolver card mirrored the summary card because
+`skillEvolver.provider` is empty, so it inherits the summary slot's config and
+status. That inheritance is by design; the wording it renders is fixed here.
+
+**Tests.** `tests/unit/viewer/overview-model-status.test.ts` covers the
+placeholder rules (host-managed, genuinely unconfigured, configured, local
+embedding); `tests/unit/config/llm-max-tokens-headers.test.ts` now pins the
+2048 default with the reasoning recorded inline. Both were written to fail
+first.
+
 ## [v2.0.19-dsh.3]
 
 ### Changed — publishing split: GitHub Packages is automatic, npmjs is manual

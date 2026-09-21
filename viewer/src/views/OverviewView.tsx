@@ -30,6 +30,7 @@ import { navigate } from "../stores/router";
 import type { ApiLogDTO, CoreEvent, CoreEventType } from "../api/types";
 import { ActivityDashboard } from "./overview/ActivityDashboard";
 import {
+  displayModelName,
   formatModelStatusLine,
   modelScalarText,
   modelStatusFromInfo,
@@ -445,8 +446,10 @@ function ModelCard({
   hint?: string;
   onClick?: () => void;
 }) {
+  // `displayModelName` owns the placeholder rules: a host-managed slot has
+  // no model name by design and must not read as "not configured".
   const model = modelScalarText(info?.model).trim();
-  const display = model ? model : t("overview.metric.model.unconfigured");
+  const display = displayModelName(info);
   const status = modelStatusFromInfo(info);
   const titleAttr = status.tooltip
     ? `${model || label}\n\n${status.tooltip}`

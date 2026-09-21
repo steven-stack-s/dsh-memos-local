@@ -86,6 +86,32 @@ export function modelStatusFromInfo(info: ModelInfo | undefined): {
   };
 }
 
+/**
+ * Name to render on a model card's value line.
+ *
+ * Most slots carry a model name from `config.yaml`, but the DSH host
+ * bridge is different: it deliberately leaves `llm.model` empty because
+ * the *host* owns the model choice. Rendering the generic "Not
+ * configured" placeholder there reported a healthy, actively-serving
+ * slot as if it had never been set up.
+ *
+ * So: a real name wins; otherwise a host-managed slot says so; only a
+ * slot that genuinely has nothing configured falls back to the
+ * placeholder.
+ */
+export function displayModelName(info: ModelInfo | undefined): string {
+  const model = modelScalarText(info?.model).trim();
+  if (model) return model;
+
+  const provider = modelScalarText(info?.provider).trim();
+  // `host` is the DSH bridge marker (see core/llm/types.ts LlmProviderName).
+  // An empty model name is its expected state, not a misconfiguration.
+  if (provider === "host") return t("overview.metric.model.hostManaged");
+  if (info?.available && provider && provider !== "none") return provider;
+
+  return t("overview.metric.model.unconfigured");
+}
+
 export function modelScalarText(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);

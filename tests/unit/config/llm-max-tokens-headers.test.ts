@@ -41,10 +41,19 @@ describe("resolveConfig llm.maxTokens + llm.headers", () => {
     expect(warnings).toEqual([]);
   });
 
-  it("declares llm.maxTokens with a sane default of 1024", () => {
-    expect(DEFAULT_CONFIG.llm.maxTokens).toBe(1024);
+  it("declares llm.maxTokens with a default of 2048", () => {
+    // Raised from 1024: the summary slot also serves the structured-JSON
+    // calls (reflection / scoring / L3 abstraction), and a reasoning model
+    // spends output tokens before it emits any JSON. At 1024 the budget was
+    // frequently exhausted mid-object, which surfaced as
+    // \`llm_output_malformed: ... reached the token cap before completing\`
+    // and painted the Overview model card red even though the call had a
+    // working fallback. 2048 keeps the raise conservative (half of the
+    // l3Llm / skillEvolver budget of 4096) because this slot is on the
+    // turn path, where latency and cost matter more.
+    expect(DEFAULT_CONFIG.llm.maxTokens).toBe(2048);
     const cfg = resolveConfig({});
-    expect(cfg.llm.maxTokens).toBe(1024);
+    expect(cfg.llm.maxTokens).toBe(2048);
   });
 
   it("declares llm.headers defaulting to an empty map", () => {

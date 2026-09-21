@@ -59,7 +59,16 @@ export const DEFAULT_CONFIG: ResolvedConfig = {
     providerIgnore: [],
     providerOrder: [],
     openRouter: false,
-    maxTokens: 1024,
+    // 2048, not 1024. This slot carries not only the summariser but the
+    // structured-JSON calls (reflection synthesis, alpha scoring, L3
+    // abstraction). A reasoning model spends output tokens before emitting
+    // any JSON, so a 1024 budget was often exhausted mid-object and
+    // surfaced as "llm_output_malformed: ... reached the token cap before
+    // completing" — painting the Overview model card red even when the
+    // call had a working fallback. Kept at half of the l3Llm /
+    // skillEvolver budget (4096) because this slot sits on the turn path,
+    // where latency and cost matter more than for the off-path slots.
+    maxTokens: 2048,
     headers: {},
   },
   l3Llm: {
