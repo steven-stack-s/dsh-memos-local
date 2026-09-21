@@ -12,6 +12,14 @@ export function registerPoliciesRoutes(routes, deps) {
         const q = params.get("q") || undefined;
         const ownerAgentKind = params.get("ownerAgentKind") || undefined;
         const ownerProfileId = params.get("ownerProfileId") || undefined;
+        // Viewer list: show every namespace's rows by default (an explicit
+        // ownerAgentKind / ownerProfileId query still narrows) — same
+        // convention as overview.ts / trace.ts / session.ts. Without this
+        // pin the list follows the core's turn-scoped active namespace: on
+        // a fresh boot that is the configured `profileId`, which can
+        // differ from the profile that actually owns the rows, so the
+        // Overview card showed a non-zero count while this panel listed
+        // nothing until a turn flipped the namespace (#2131).
         const policies = await deps.core.listPolicies({
             status,
             limit,
@@ -19,12 +27,14 @@ export function registerPoliciesRoutes(routes, deps) {
             q,
             ownerAgentKind,
             ownerProfileId,
+            includeAllNamespaces: true,
         });
         const total = await deps.core.countPolicies({
             status,
             q,
             ownerAgentKind,
             ownerProfileId,
+            includeAllNamespaces: true,
         });
         return {
             policies,
@@ -183,9 +193,14 @@ export function registerPoliciesRoutes(routes, deps) {
             writeError(ctx, 404, "not_found", `policy not found: ${id}`);
             return;
         }
+        // Cross-reference lists for the drawer: they must resolve against
+        // the whole database, otherwise a policy owned by another profile
+        // renders "0 linked skills / 0 linked world models" even though the
+        // links exist. Same all-namespace convention as the list routes
+        // (#2131).
         const [skills, worldModels] = await Promise.all([
-            deps.core.listSkills({ limit: 500 }),
-            deps.core.listWorldModels({ limit: 500 }),
+            deps.core.listSkills({ limit: 500, includeAllNamespaces: true }),
+            deps.core.listWorldModels({ limit: 500, includeAllNamespaces: true }),
         ]);
         return {
             skills: skills
@@ -210,17 +225,21 @@ export function registerPoliciesRoutes(routes, deps) {
         const q = params.get("q") || undefined;
         const ownerAgentKind = params.get("ownerAgentKind") || undefined;
         const ownerProfileId = params.get("ownerProfileId") || undefined;
+        // Same all-namespace convention as the policies list above — see
+        // the comment there (#2131).
         const worldModels = await deps.core.listWorldModels({
             limit,
             offset,
             q,
             ownerAgentKind,
             ownerProfileId,
+            includeAllNamespaces: true,
         });
         const total = await deps.core.countWorldModels({
             q,
             ownerAgentKind,
             ownerProfileId,
+            includeAllNamespaces: true,
         });
         return {
             worldModels,

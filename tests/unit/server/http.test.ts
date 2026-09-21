@@ -570,6 +570,59 @@ describe("HTTP server — REST routes", () => {
     );
   });
 
+  it("pins the Skills / Experiences / Environment-knowledge panels to all-namespace reads (#2131)", async () => {
+    // Regression: the Overview cards pin every count to
+    // `includeAllNamespaces: true`, but the three panels behind them
+    // (skills / policies / world-models) did NOT. When the core's
+    // active namespace had not yet been flipped by a turn — i.e. it
+    // was still the configured `profileId` while the rows were owned
+    // by another profile — the Overview showed non-zero counts while
+    // every panel listed nothing. The symptom self-healed after one
+    // conversation because that turn flipped the active namespace.
+    //
+    // All five viewer panels must use one convention, so nothing here
+    // may depend on the turn-scoped active namespace.
+    await fetch(`${handle.url}/api/v1/skills?limit=20&offset=0`);
+    expect(core.listSkills).toHaveBeenCalledWith(
+      expect.objectContaining({ includeAllNamespaces: true }),
+    );
+    expect(core.countSkills).toHaveBeenCalledWith(
+      expect.objectContaining({ includeAllNamespaces: true }),
+    );
+
+    await fetch(`${handle.url}/api/v1/policies?limit=20&offset=0`);
+    expect(core.listPolicies).toHaveBeenCalledWith(
+      expect.objectContaining({ includeAllNamespaces: true }),
+    );
+    expect(core.countPolicies).toHaveBeenCalledWith(
+      expect.objectContaining({ includeAllNamespaces: true }),
+    );
+
+    await fetch(`${handle.url}/api/v1/world-models?limit=20&offset=0`);
+    expect(core.listWorldModels).toHaveBeenCalledWith(
+      expect.objectContaining({ includeAllNamespaces: true }),
+    );
+    expect(core.countWorldModels).toHaveBeenCalledWith(
+      expect.objectContaining({ includeAllNamespaces: true }),
+    );
+  });
+
+  it("keeps explicit namespace filters winning over the all-namespace default", async () => {
+    // The all-namespace pin must not defeat the toolbar's namespace
+    // dropdown: an explicit ownerAgentKind/ownerProfileId still has to
+    // reach the core so users can narrow to a single profile.
+    await fetch(
+      `${handle.url}/api/v1/skills?limit=20&offset=0&ownerAgentKind=deepseek-harness&ownerProfileId=ptc`,
+    );
+    expect(core.listSkills).toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeAllNamespaces: true,
+        ownerAgentKind: "deepseek-harness",
+        ownerProfileId: "ptc",
+      }),
+    );
+  });
+
   it("GET /api/v1/config returns resolved config", async () => {
     const r = await fetch(`${handle.url}/api/v1/config`);
     expect(r.status).toBe(200);

@@ -22,11 +22,20 @@ export function registerSkillRoutes(routes: Routes, deps: ServerDeps): void {
     // can tell the client whether there's more without a count query.
     const pageSize = limitOrUndefined(params.get("limit")) ?? 50;
     const offset = Math.max(0, Number(params.get("offset") ?? 0) || 0);
+    // Viewer list: show every namespace's rows by default (an explicit
+    // ownerAgentKind / ownerProfileId query still narrows) — same
+    // convention as overview.ts / trace.ts / session.ts. Without this
+    // pin the list follows the core's turn-scoped active namespace: on
+    // a fresh boot that is the configured `profileId`, which can
+    // differ from the profile that actually owns the rows, so the
+    // Overview card showed a non-zero count while this panel listed
+    // nothing until a turn flipped the namespace (#2131).
     let all = await deps.core.listSkills({
       status,
       limit: q ? 5000 : pageSize + offset + 1,
       ownerAgentKind,
       ownerProfileId,
+      includeAllNamespaces: true,
     });
     if (q) {
       all = all.filter(
@@ -39,6 +48,7 @@ export function registerSkillRoutes(routes: Routes, deps: ServerDeps): void {
       status,
       ownerAgentKind,
       ownerProfileId,
+      includeAllNamespaces: true,
     });
     return {
       skills: page,

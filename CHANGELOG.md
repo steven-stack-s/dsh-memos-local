@@ -3,6 +3,54 @@
 Notable changes to `dsh-memos-local`. Maintained by hand; for the full
 per-commit history use `git log` or the GitHub releases page.
 
+## [v2.0.19-dsh.2]
+
+### Fixed — Viewer panels showed no data while the Overview counts did
+
+The Skills, Experiences, and Environment-knowledge panels could render an
+**empty list** while the Overview cards for the same layers showed a
+**non-zero count**. Talking one more round to the agent made the panels
+recover, which made it look like a caching problem; it was not.
+
+**Root cause.** The Overview endpoint pins `includeAllNamespaces: true` on
+every count, but the three panels behind it did not. The core keeps a
+*turn-scoped* active namespace: the DSH adapter boots it from the configured
+`profileId`, while rows are actually owned by the session's `agentPreset`.
+When those differ — e.g. the shipped `cordis.patch.yml` sets
+`profileId: default` while every session carries `agentPreset: standard` —
+namespace-scoped reads return nothing until the first turn flips the active
+namespace. Hence: counts visible, lists empty, self-healing after one turn.
+The same mismatch made the policy drawer report "0 linked skills / 0 linked
+world models" for rows whose links existed.
+
+**Fix.** Align the three panel routes with the convention already used by
+`overview.ts`, `trace.ts`, and `session.ts` (#2131): pass
+`includeAllNamespaces: true` and let an explicit
+`ownerAgentKind` / `ownerProfileId` query narrow the result.
+
+- `GET /api/v1/skills` — `listSkills` / `countSkills`.
+- `GET /api/v1/policies` — `listPolicies` / `countPolicies`.
+- `GET /api/v1/world-models` — `listWorldModels` / `countWorldModels`.
+- `GET /api/v1/policies/:id/usage` — the cross-reference lists.
+
+The core's namespace isolation is **unchanged**; it is intended behaviour.
+Only the viewer's read convention changed, so the cards and the panels can no
+longer disagree. The namespace dropdown still narrows as before.
+
+**Regression tests.** `tests/unit/server/http.test.ts` pins the
+all-namespace convention for all six calls plus the "explicit filter still
+narrows" case; `tests/unit/pipeline/repro-namespace-flip.test.ts` reproduces
+the boot-time namespace mismatch and asserts the panels still resolve.
+
+Verified end-to-end against a snapshot of a real database booted with the
+mismatching `profileId`: before the fix the Overview read 35/99/3 with all
+three panels empty; after it, the panels return those same rows.
+
+> Note: the shipped `cordis.patch.yml` still sets `profileId: default`, which
+> does not match the `agentPreset` values in use (`standard`, `ptc`). It is no
+> longer harmful for the viewer, but the config itself is still misleading and
+> should be corrected separately.
+
 ## [v2.0.19-dsh.1]
 
 ### Versioning — the fork now carries its own revision series
