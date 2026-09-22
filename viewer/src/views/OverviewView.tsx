@@ -15,7 +15,7 @@
  *
  * Third row = live activity dashboard. Six per-category tiles
  * (memory / experience / environment knowledge / skill / retrieval /
- * feedback) each showing a 5-minute event count, sparkline, and the
+ * feedback) each showing a selected-window event count, sparkline, and the
  * most recent event in plain language. Tiles are bucketed off the
  * same SSE buffer (`recent`) we already maintain. See
  * `views/overview/ActivityDashboard.tsx` for the renderer and
@@ -29,6 +29,10 @@ import { t } from "../stores/i18n";
 import { navigate } from "../stores/router";
 import type { ApiLogDTO, CoreEvent, CoreEventType } from "../api/types";
 import { ActivityDashboard } from "./overview/ActivityDashboard";
+import {
+  ACTIVITY_WINDOWS, readActivityWindow, saveActivityWindow,
+  retainActivityEvents, loadActivityLogs, type ActivityLogPage,
+} from "./overview/activity-window";
 import {
   displayModelName,
   formatModelStatusLine,
@@ -62,14 +66,12 @@ interface OverviewSummary {
   skillEvolver?: ModelInfo;
 }
 
-interface ApiLogsResponse {
-  logs: ApiLogDTO[];
-}
-
 export function OverviewView() {
   const [summary, setSummary] = useState<OverviewSummary | null>(null);
   const [recent, setRecent] = useState<CoreEvent[]>([]);
   const [recentApiLogEvents, setRecentApiLogEvents] = useState<CoreEvent[]>([]);
+  const [activityWindow, setActivityWindow] = useState(readActivityWindow);
+  const [historyStatus, setHistoryStatus] = useState<"loading" | "ready" | "partial" | "error">("loading");
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -88,14 +90,11 @@ export function OverviewView() {
   }, []);
 
   useEffect(() => {
-    // The dashboard buckets events into a 5-minute sliding window
-    // (30 buckets × 10 s). Cap the buffer at 256 so we keep enough
-    // history even on chatty agents (trace + retrieval + feedback can
-    // each fire several times per minute) without growing unbounded.
+    // Keep the largest selectable window, including across shorter selections.
     const handle = openSse("/api/v1/events", (_, data) => {
       try {
         const evt = JSON.parse(data) as CoreEvent;
-        setRecent((prev) => [evt, ...prev].slice(0, 256));
+        setRecent((prev) => retainActivityEvents([evt, ...prev], Date.now()));
       } catch {
         /* skip */
       }
@@ -105,19 +104,24 @@ export function OverviewView() {
 
   useEffect(() => {
     const ctrl = new AbortController();
-    const load = () =>
-      api
-        .get<ApiLogsResponse>("/api/v1/api-logs?limit=200&offset=0", {
-          signal: ctrl.signal,
-        })
-        .then((res) => {
-          setRecentApiLogEvents(
-            (res.logs ?? [])
-              .map(apiLogToCoreEvent)
-              .filter((evt): evt is CoreEvent => evt !== null),
-          );
-        })
-        .catch(() => void 0);
+    let loading = false;
+    const load = async () => {
+      if (loading || ctrl.signal.aborted) return;
+      loading = true;
+      try {
+        const res = await loadActivityLogs(
+          (offset) => api.get<ActivityLogPage>(`/api/v1/api-logs?limit=500&offset=${offset}`, { signal: ctrl.signal }),
+          Date.now(),
+        );
+        if (ctrl.signal.aborted) return;
+        setRecentApiLogEvents(res.logs.map(apiLogToCoreEvent).filter((evt): evt is CoreEvent => evt !== null));
+        setHistoryStatus(res.truncated ? "partial" : "ready");
+      } catch {
+        if (!ctrl.signal.aborted) setHistoryStatus("error");
+      } finally {
+        loading = false;
+      }
+    };
     void load();
     // api_logs is the durable source behind the Logs page. Polling it
     // keeps the overview heartbeat alive even when the volatile CoreEvent
@@ -236,33 +240,39 @@ export function OverviewView() {
        * Row 3: live activity dashboard. Replaces the previous JSON
        * `.stream` block with a 3 × 2 grid of category tiles
        * (memory / experience / environment knowledge / skill /
-       * retrieval / feedback) each showing a 5-minute sparkline plus
+       * retrieval / feedback) each showing a selected-window sparkline plus
        * the latest event in plain language. The component owns its
        * own clock tick so sparklines slide left even while the SSE
        * stream is quiet.
        */}
       <section class="card card--flat">
-        <div class="card__header">
-          <div>
-            <h3 class="card__title">{t("overview.live.title")}</h3>
+        <div class="card__header" style={{ flexWrap: "wrap", gap: "12px" }}>
+          <h3 class="card__title">{t("overview.live.title")}</h3>
+          <div class="segmented" role="group" aria-label={t("overview.live.window.label")}>
+            {ACTIVITY_WINDOWS.map((minutes) => (
+              <button
+                key={minutes}
+                type="button"
+                class="segmented__item"
+                aria-pressed={activityWindow === minutes}
+                onClick={() => {
+                  setActivityWindow(minutes);
+                  saveActivityWindow(minutes);
+                }}
+              >
+                {minutes === 60 ? t("overview.live.window.hour") : t("overview.live.window.minutes", { n: minutes })}
+              </button>
+            ))}
           </div>
         </div>
-        <ActivityDashboard events={mergeRecentEvents(recent, recentApiLogEvents)} />
+        <p class="muted" style={{ fontSize: "var(--fs-xs)", margin: "0 0 12px" }} role="status">
+          {t("overview.live.coverage")}
+          {historyStatus !== "ready" && ` ${t(`overview.live.history.${historyStatus}`)}`}
+        </p>
+        <ActivityDashboard events={retainActivityEvents([...recentApiLogEvents, ...recent], Date.now())} minutes={activityWindow} />
       </section>
     </>
   );
-}
-
-function mergeRecentEvents(
-  liveEvents: readonly CoreEvent[],
-  apiLogEvents: readonly CoreEvent[],
-): CoreEvent[] {
-  const byKey = new Map<string, CoreEvent>();
-  for (const evt of [...apiLogEvents, ...liveEvents]) {
-    const id = evt.correlationId ?? evt.seq;
-    byKey.set(`${evt.type}:${id}:${evt.ts}`, evt);
-  }
-  return [...byKey.values()].sort((a, b) => b.ts - a.ts).slice(0, 512);
 }
 
 function apiLogToCoreEvent(log: ApiLogDTO): CoreEvent | null {

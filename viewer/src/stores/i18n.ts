@@ -265,8 +265,15 @@ const en = {
   // knowledge / skill / retrieval / feedback) with a five-minute
   // sparkline and the most recent event in plain language.
   "overview.live.title": "Live activity",
-  "overview.live.tile.count": "events in last 5 min",
-  "overview.live.tile.empty": "No events in last 5 min",
+  "overview.live.tile.count": "recorded events in last {window}",
+  "overview.live.tile.empty": "No recorded events in last {window}",
+  "overview.live.window.label": "Activity time window",
+  "overview.live.window.minutes": "{n} min",
+  "overview.live.window.hour": "1 hour",
+  "overview.live.coverage": "Recorded logs and received live events; live event history may be incomplete.",
+  "overview.live.history.loading": "Loading history...",
+  "overview.live.history.partial": "History limit reached; showing partial records.",
+  "overview.live.history.error": "History refresh failed; records may be outdated.",
 
   // Tile labels (also used by the per-event "category pill"). Keep
   // these in sync with overview.metric.* / nav.* labels — same noun,
@@ -1181,8 +1188,15 @@ const zh: Record<TranslationKey, string> = {
   "overview.metric.policies.breakdown": "{active} 已启用 · {candidate} 候选",
   "overview.metric.skills.breakdown": "{active} 已启用 · {candidate} 候选",
   "overview.live.title": "实时活动",
-  "overview.live.tile.count": "最近 5 分钟事件",
-  "overview.live.tile.empty": "最近 5 分钟无事件",
+  "overview.live.tile.count": "最近 {window}已记录事件",
+  "overview.live.tile.empty": "最近 {window}无已记录事件",
+  "overview.live.window.label": "活动时间范围",
+  "overview.live.window.minutes": "{n} 分钟",
+  "overview.live.window.hour": "1 小时",
+  "overview.live.coverage": "数据范围：已记录日志与已接收的实时事件，实时事件历史可能不完整。",
+  "overview.live.history.loading": "正在加载历史记录…",
+  "overview.live.history.partial": "历史读取已达上限，当前仅显示部分记录。",
+  "overview.live.history.error": "历史刷新失败，当前记录可能不是最新。",
 
   "overview.live.cat.session": "对话",
   "overview.live.cat.task": "任务",
