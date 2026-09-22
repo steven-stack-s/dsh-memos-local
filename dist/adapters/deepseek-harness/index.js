@@ -374,8 +374,11 @@ export async function apply(ctx, config) {
             createRecallMessage: (text) => createUserMessage({
                 content: [{ type: "text", text }],
                 source: {
-                    kind: "plugin",
-                    plugin: DEEPSEEK_HARNESS_PLUGIN,
+                    // DSH 0.1.7（Session V4）起拒收 kind:"plugin" 旧包壳，要求生产者自有 kind；
+                    // 官方 producerKind() 对未登记生产者解析为 "plugin:<name>"，并删除 plugin 字段。
+                    // 旧的 @deepseek-ai/dsh-llm 类型把 kind 收窄为 "model"|"user"|"tool"|"plugin"，
+                    // 而 0.1.7 的类型已放宽为字符串，故此处断言桥接（运行时不受影响）。
+                    kind: `plugin:${DEEPSEEK_HARNESS_PLUGIN}`,
                     form: "recall",
                 },
             }),

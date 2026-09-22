@@ -3,6 +3,24 @@
 Notable changes to `dsh-memos-local`. Maintained by hand; for the full
 per-commit history use `git log` or the GitHub releases page.
 
+## [v2.0.20-dsh.2]
+
+### Fixed — DSH 0.1.7-alpha.1 compatibility (Session format V4)
+
+- **On DSH 0.1.7-alpha.1 every turn failed** with `format v4 message requires a
+  producer-owned source kind`. 0.1.7 rejects the retired `source.kind === "plugin"`
+  wrapper (`dsh-session-format-v3-to-v4` refuses plugin wrappers and demands a
+  producer-owned kind), while the recall-context message and the host-LLM user
+  message still used that old shape — so the `agent/pre-step` recall injection was
+  refused on write and the whole turn aborted.
+  - `adapters/deepseek-harness/index.ts` (`createRecallMessage`): the source kind is
+    now `plugin:${DEEPSEEK_HARNESS_PLUGIN}` — what the official `producerKind()`
+    derives for an unregistered producer — with the `plugin` field dropped and
+    `form: "recall"` kept (that value is part of the 0.1.7 `ContextForm` vocabulary).
+  - `adapters/deepseek-harness/host-llm.ts` (`toDshMessage`): same change for
+    `HOST_LLM_MESSAGE_SOURCE`.
+- Verified end to end on DSH 0.1.7-alpha.1: recall injection passes V4 admission,
+  turns complete normally again, and the web boot reports zero inactive entries.
 ## [v2.0.20-dsh.1]
 
 ### Upstream sync
