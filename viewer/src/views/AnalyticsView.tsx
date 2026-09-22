@@ -30,6 +30,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { api } from "../api/client";
 import { t } from "../stores/i18n";
 import { Icon } from "../components/Icon";
+import { toolColor } from "./analytics/tool-color";
 
 type Range = 7 | 30 | 90;
 
@@ -255,6 +256,8 @@ interface ToolStat {
   avgMs: number;
   p50Ms: number;
   p95Ms: number;
+  /** False when the sample is too small for percentiles to be meaningful. */
+  enoughSamples?: boolean;
   lastTs: number;
 }
 
@@ -272,10 +275,8 @@ interface ToolCallCount {
   lastTs: number;
 }
 
-const TOOL_COLORS = [
-  "#7c8cf5", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6",
-  "#06b6d4", "#ec4899", "#84cc16", "#f97316", "#6366f1",
-];
+// Tool colours live in ./analytics/tool-color so they can be unit tested
+// and so a tool keeps its colour when the list is re-sorted by call count.
 
 function ToolLatencyCard() {
   const [minutes, setMinutes] = useState<ToolRange>(1_440);
@@ -385,11 +386,7 @@ function UnavailableToolList({ tools }: { tools: ToolCallCount[] }) {
       </div>
       <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap">
         {tools.slice(0, 12).map((tool) => (
-          <span
-            key={tool.name}
-            class="pill pill--info"
-            title={`${tool.name}: ${tool.calls} calls`}
-          >
+          <span key={tool.name} class="pill pill--info">
             {tool.name} · {tool.calls}
           </span>
         ))}
@@ -524,9 +521,12 @@ function ToolLineChart({
             </text>
           );
         })}
-        {toolNames.map((tn, ti) => {
+        {toolNames.map((tn) => {
           if (!isVisible(tn)) return null;
-          const color = TOOL_COLORS[ti % TOOL_COLORS.length];
+          // Colour follows the NAME, not the list position — the list is
+          // re-sorted by call count on every poll, which used to make tools
+          // swap colours and desync from the legend below.
+          const color = toolColor(tn, toolNames);
           const pts = series.map((s, i) => ({
             x: toX(i),
             y: toY(getSeriesValue(s, tn)),
@@ -588,19 +588,15 @@ function ToolLineChart({
         )}
       </svg>
       <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-2);padding:0 4px">
-        {toolNames.map((tn, ti) => {
-          const color = TOOL_COLORS[ti % TOOL_COLORS.length];
+        {toolNames.map((tn) => {
+          const color = toolColor(tn, toolNames);
           const active = isVisible(tn);
           return (
             <button
               key={tn}
               type="button"
               onClick={() => toggleTool(tn)}
-              title={visible.size === 0
-                ? `Click to show only ${tn}`
-                : active
-                ? `Click to hide ${tn}`
-                : `Click to show ${tn}`}
+              aria-label={tn}
               style={`
                 display:flex;align-items:center;gap:6px;
                 font-size:var(--fs-xs);
@@ -660,8 +656,27 @@ function ToolAggTable({ rows, maxAvg }: { rows: ToolStat[]; maxAvg: number }) {
             </div>
             <div key={`${r.name}-c`} class="mono" style="text-align:right">{r.calls}</div>
             <div key={`${r.name}-a`} class="mono" style={`text-align:right;color:${latencyColor(r.avgMs)}`}>{r.avgMs}</div>
-            <div key={`${r.name}-50`} class="mono" style="text-align:right">{r.p50Ms}</div>
-            <div key={`${r.name}-95`} class="mono" style={`text-align:right;font-weight:600;color:${latencyColor(r.p95Ms)}`}>{r.p95Ms}</div>
+            {/*
+              * Below MIN_SAMPLES a "p95" is just the largest observation —
+              * p95 of one call is that call. Rendering it in the same bold,
+              * colour-coded style as a real percentile made a single slow
+              * call (e.g. one 33s ask_user_question waiting on a human) read
+              * as the slowest tool. De-emphasise it instead.
+              */}
+            <div
+              key={`${r.name}-50`}
+              class="mono"
+              style={`text-align:right${r.enoughSamples ? "" : ";opacity:.6"}`}
+            >
+              {r.p50Ms}
+            </div>
+            <div
+              key={`${r.name}-95`}
+              class="mono"
+              style={`text-align:right;font-weight:600;${r.enoughSamples ? `color:${latencyColor(r.p95Ms)}` : "opacity:.6"}`}
+            >
+              {r.p95Ms}
+            </div>
             <div
               key={`${r.name}-b`}
               style={`

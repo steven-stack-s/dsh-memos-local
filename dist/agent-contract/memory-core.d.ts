@@ -452,6 +452,29 @@ export interface MemoryCore {
         logs: ApiLogDTO[];
         total: number;
     }>;
+    /**
+     * Per-tool rollup of `api_logs` over a time window, computed in SQL.
+     *
+     * Exists because {@link listApiLogs} pages rows (and caps at 500), so
+     * aggregating through it silently truncated the Analytics tool panel to
+     * roughly the last hour regardless of the selected window — a 98%
+     * under-count on a 12k-row table. Counts, errors and the average here
+     * cover every row in the window; the returned `durationsMs` is a capped
+     * sample used only for percentiles.
+     */
+    aggregateApiLogsByTool(input?: {
+        since?: number;
+        until?: number;
+        toolNames?: readonly string[];
+        maxDurationsPerTool?: number;
+    }): Promise<Array<{
+        toolName: string;
+        calls: number;
+        errors: number;
+        avgMs: number;
+        lastTs: number;
+        durationsMs: number[];
+    }>>;
     listSkills(input?: {
         status?: SkillDTO["status"];
         limit?: number;

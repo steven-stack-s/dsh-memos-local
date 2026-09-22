@@ -32,6 +32,31 @@ export interface ApiLogInsert {
     success: boolean;
     calledAt?: number;
 }
+/** One tool's rollup over a time window — see `aggregateByTool`. */
+export interface ApiLogToolAggregate {
+    toolName: string;
+    calls: number;
+    errors: number;
+    avgMs: number;
+    lastTs: number;
+    /** Sorted ascending; used for percentiles by the caller. */
+    durationsMs: number[];
+}
+export interface ApiLogAggregateFilter {
+    /** Only include rows with `called_at >= since` (epoch ms). */
+    since?: number;
+    /** Only include rows with `called_at <= until` (epoch ms). */
+    until?: number;
+    /** Restrict to these tools; omit for every tool. */
+    toolNames?: readonly string[];
+    /**
+     * Safety valve: maximum rows sampled per tool when collecting the raw
+     * durations used for percentiles. Counts and averages always cover the
+     * full window (they are computed in SQL); only the percentile sample is
+     * capped, and `durationsTruncated` tells the caller when that happened.
+     */
+    maxDurationsPerTool?: number;
+}
 export interface ApiLogFilter {
     /** Filter by a single tool name. */
     toolName?: string;
@@ -45,5 +70,15 @@ export declare function makeApiLogsRepo(db: StorageDb): {
     insert(row: ApiLogInsert): void;
     count(filter?: Pick<ApiLogFilter, "toolName" | "toolNames">): number;
     list(filter?: ApiLogFilter): ApiLogRow[];
+    /**
+     * Per-tool rollup over a time window.
+     *
+     * Counts / errors / average come straight from SQL, so they cover every
+     * row in the window no matter how large `api_logs` grows. The raw
+     * durations are additionally collected (newest-first, capped at
+     * `maxDurationsPerTool`) so the caller can compute percentiles without
+     * a second round trip.
+     */
+    aggregateByTool(filter?: ApiLogAggregateFilter): ApiLogToolAggregate[];
 };
 //# sourceMappingURL=api_logs.d.ts.map

@@ -119,6 +119,7 @@ function stubCore(): MemoryCore {
     ] as any),
     countTraces: vi.fn(async () => 1),
     listApiLogs: vi.fn(async () => ({ logs: [], total: 0 })),
+    aggregateApiLogsByTool: vi.fn(async () => []),
     listSkills: vi.fn(async () => []),
     countSkills: vi.fn(async () => 0),
     getSkill: vi.fn(async (id) => ({
@@ -562,12 +563,36 @@ describe("HTTP server — REST routes", () => {
     // The tool panel folds api_logs entries and trace tool-calls into
     // one aggregation; both feeds must be pinned to all-namespace reads
     // or the chart under-reports after a namespace flip (#2131).
-    expect(core.listApiLogs).toHaveBeenCalledWith(
-      expect.objectContaining({ includeAllNamespaces: true }),
+    //
+    // api_logs is now aggregated in SQL rather than read page-by-page:
+    // `listApiLogs` clamps to 500 rows, which silently truncated every
+    // window beyond ~1h (24h reported 12 calls where the truth was 61).
+    expect(core.aggregateApiLogsByTool).toHaveBeenCalledWith(
+      expect.objectContaining({ since: expect.any(Number) }),
     );
     expect(core.listTraces).toHaveBeenCalledWith(
       expect.objectContaining({ includeAllNamespaces: true }),
     );
+  });
+
+  it("aggregates api_logs over the requested window instead of paging", async () => {
+    // Guards the regression directly: the route must ask the repo for a
+    // time-bounded rollup, and must NOT fall back to the paged list.
+    const before = (core.listApiLogs as any).mock.calls.length;
+    const r = await fetch(`${handle.url}/api/v1/metrics/tools?minutes=43200`);
+    expect(r.status).toBe(200);
+
+    const call = (core.aggregateApiLogsByTool as any).mock.calls.at(-1)![0];
+    // 30 days = 43_200 minutes; allow slack for test execution time.
+    const ageMs = Date.now() - call.since;
+    expect(ageMs).toBeGreaterThan(29 * 24 * 60 * 60 * 1000);
+    expect(ageMs).toBeLessThan(31 * 24 * 60 * 60 * 1000);
+    // Only the three public tools are requested.
+    expect(call.toolNames).toEqual(
+      expect.arrayContaining(["memos_search", "memory_add"]),
+    );
+    // The paged reader must stay untouched by this route.
+    expect((core.listApiLogs as any).mock.calls.length).toBe(before);
   });
 
   it("pins the /diag probes to all-namespace reads too (#2131)", async () => {

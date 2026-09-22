@@ -54,16 +54,31 @@ export const DEFAULT_CONFIG = {
         providerIgnore: [],
         providerOrder: [],
         openRouter: false,
-        // 2048, not 1024. This slot carries not only the summariser but the
-        // structured-JSON calls (reflection synthesis, alpha scoring, L3
-        // abstraction). A reasoning model spends output tokens before emitting
-        // any JSON, so a 1024 budget was often exhausted mid-object and
-        // surfaced as "llm_output_malformed: ... reached the token cap before
-        // completing" — painting the Overview model card red even when the
-        // call had a working fallback. Kept at half of the l3Llm /
-        // skillEvolver budget (4096) because this slot sits on the turn path,
-        // where latency and cost matter more than for the off-path slots.
-        maxTokens: 2048,
+        // 8192, raised from 2048 (which was itself raised from 1024).
+        //
+        // This slot carries the structured-JSON calls (reflection synthesis,
+        // alpha scoring) AND L3 world-model abstraction. The L3 step is by far
+        // the hungriest: it emits a whole environment model — title, domain
+        // tags, three arrays (environment / inference / constraints), and a
+        // markdown body — so a reasoning model can spend thousands of output
+        // tokens before the JSON closes. When the budget runs out mid-object
+        // the call fails as
+        //   "llm_output_malformed: ... reached the token cap before completing"
+        // which is recorded as a hard error and paints the Overview model card
+        // red even though retrieval and the turn itself keep working.
+        //
+        // Measured, not guessed: replaying the real L3 abstraction prompt
+        // against the host LLM with six live policies produced 11 331 output
+        // characters in 2 707 completion tokens (11.8 s, valid JSON). That is
+        // already above the previous 2048 — which is why the 1024→2048 raise
+        // did not stop the errors (1028 of them in `api_logs`, 307 from
+        // `world_model_generate`). Stored world models reach ~24 900
+        // characters, so 8192 leaves headroom for the largest clusters.
+        //
+        // `maxTokens` is a ceiling, not a target: shorter calls stop when they
+        // finish and are unaffected. The budget is only consumed by work that
+        // actually needs it.
+        maxTokens: 8192,
         headers: {},
     },
     l3Llm: {

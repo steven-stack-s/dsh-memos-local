@@ -36,6 +36,33 @@ export interface ApiLogInsert {
   calledAt?: number;
 }
 
+/** One tool's rollup over a time window — see `aggregateByTool`. */
+export interface ApiLogToolAggregate {
+  toolName: string;
+  calls: number;
+  errors: number;
+  avgMs: number;
+  lastTs: number;
+  /** Sorted ascending; used for percentiles by the caller. */
+  durationsMs: number[];
+}
+
+export interface ApiLogAggregateFilter {
+  /** Only include rows with `called_at >= since` (epoch ms). */
+  since?: number;
+  /** Only include rows with `called_at <= until` (epoch ms). */
+  until?: number;
+  /** Restrict to these tools; omit for every tool. */
+  toolNames?: readonly string[];
+  /**
+   * Safety valve: maximum rows sampled per tool when collecting the raw
+   * durations used for percentiles. Counts and averages always cover the
+   * full window (they are computed in SQL); only the percentile sample is
+   * capped, and `durationsTruncated` tells the caller when that happened.
+   */
+  maxDurationsPerTool?: number;
+}
+
 export interface ApiLogFilter {
   /** Filter by a single tool name. */
   toolName?: string;
@@ -85,6 +112,65 @@ export function makeApiLogsRepo(db: StorageDb) {
      WHERE tool_name = @tool_name
      ORDER BY called_at DESC, id DESC
      LIMIT @limit OFFSET @offset`,
+  );
+
+  // ── Time-window aggregation (Analytics tool panel) ──────────────
+  // Done in SQL on purpose. The previous implementation pulled a page of
+  // rows via `list()` (hard-capped at 500) and aggregated in JS, so a
+  // 24h/7d/30d window was silently computed from the most recent 500 rows
+  // only — a ~98% under-count on a 12k-row table. COUNT/SUM/AVG here cover
+  // the whole window regardless of table size.
+  const aggregateWindow = db.prepare<
+    { since: number; until: number },
+    {
+      tool_name: string;
+      calls: number;
+      errors: number;
+      total_ms: number;
+      last_ts: number;
+    }
+  >(
+    `SELECT tool_name,
+            COUNT(*)                                   AS calls,
+            SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS errors,
+            SUM(duration_ms)                           AS total_ms,
+            MAX(called_at)                             AS last_ts
+       FROM api_logs
+      WHERE called_at >= @since AND called_at <= @until
+      GROUP BY tool_name`,
+  );
+  const aggregateWindowForTools = db.prepare<
+    { since: number; until: number; tool_name: string },
+    {
+      tool_name: string;
+      calls: number;
+      errors: number;
+      total_ms: number;
+      last_ts: number;
+    }
+  >(
+    `SELECT tool_name,
+            COUNT(*)                                   AS calls,
+            SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS errors,
+            SUM(duration_ms)                           AS total_ms,
+            MAX(called_at)                             AS last_ts
+       FROM api_logs
+      WHERE called_at >= @since AND called_at <= @until AND tool_name = @tool_name
+      GROUP BY tool_name`,
+  );
+
+  // Newest-first duration sample per tool, used ONLY for percentiles.
+  // Deliberately capped: percentiles do not need every row, and an
+  // unbounded read would reintroduce the memory blow-up this whole
+  // SQL-side aggregation exists to avoid.
+  const selectDurations = db.prepare<
+    { tool_name: string; since: number; until: number; limit: number },
+    { duration_ms: number }
+  >(
+    `SELECT duration_ms FROM api_logs
+      WHERE tool_name = @tool_name AND called_at >= @since AND called_at <= @until
+      ORDER BY called_at DESC, id DESC
+      LIMIT @limit`,
   );
 
   const countByToolNames = (toolNames: readonly string[]): number => {
@@ -157,6 +243,50 @@ export function makeApiLogsRepo(db: StorageDb) {
         ? selectByTool.all({ tool_name: filter.toolName, limit, offset })
         : selectAll.all({ limit, offset });
       return rows.map(mapRow);
+    },
+
+    /**
+     * Per-tool rollup over a time window.
+     *
+     * Counts / errors / average come straight from SQL, so they cover every
+     * row in the window no matter how large `api_logs` grows. The raw
+     * durations are additionally collected (newest-first, capped at
+     * `maxDurationsPerTool`) so the caller can compute percentiles without
+     * a second round trip.
+     */
+    aggregateByTool(filter: ApiLogAggregateFilter = {}): ApiLogToolAggregate[] {
+      const since = Number.isFinite(filter.since) ? filter.since! : 0;
+      const until = Number.isFinite(filter.until) ? filter.until! : Number.MAX_SAFE_INTEGER;
+      const maxDurations = Math.max(
+        1,
+        Math.min(20_000, filter.maxDurationsPerTool ?? 2_000),
+      );
+
+      const names = filter.toolNames?.length
+        ? normalizeToolNames(filter.toolNames)
+        : null;
+      const rows = names
+        ? names
+            .map((name) => aggregateWindowForTools.get({ since, until, tool_name: name }))
+            .filter((r): r is NonNullable<typeof r> => r != null)
+        : aggregateWindow.all({ since, until });
+
+      return rows.map((r) => {
+        const durations = selectDurations
+          .all({ tool_name: r.tool_name, since, until, limit: maxDurations })
+          .map((d) => Math.max(0, d.duration_ms))
+          .sort((a, b) => a - b);
+        return {
+          toolName: r.tool_name,
+          calls: r.calls,
+          errors: r.errors,
+          // Guard against a zero-row group (impossible with GROUP BY, but
+          // keeps the division honest if the query ever changes).
+          avgMs: r.calls > 0 ? r.total_ms / r.calls : 0,
+          lastTs: r.last_ts,
+          durationsMs: durations,
+        };
+      });
     },
   };
 }

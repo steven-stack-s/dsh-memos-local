@@ -16,8 +16,16 @@
  *
  *     Output shape mirrors the legacy `memos-local-openclaw` plugin so
  *     the frontend `ToolLatencyCard` can consume it unchanged.
+ *
+ *     Aggregation happens in SQL over the requested window. It used to pull
+ *     a page of rows through `listApiLogs` and roll them up in JS, but that
+ *     method hard-caps at 500 rows — so a 24h/7d/30d window was silently
+ *     computed from roughly the last hour of data. On a 12k-row table the
+ *     30d view reported 12 calls where the truth was 574 (a 98% under-count)
+ *     and every window beyond 1h looked identical.
  */
 import type { ServerDeps } from "../types.js";
+import { latencySummary, MIN_SAMPLES_FOR_PERCENTILE } from "../../core/util/percentile.js";
 import type { Routes } from "./registry.js";
 
 interface ToolStat {
@@ -28,6 +36,13 @@ interface ToolStat {
   p50Ms: number;
   p95Ms: number;
   lastTs: number;
+  /**
+   * False when `calls` is below `MIN_SAMPLES_FOR_PERCENTILE`, i.e. the
+   * percentiles are not statistically meaningful (p95 of one call is just
+   * that call). The UI uses this to avoid drawing a full-width bar for a
+   * single observation.
+   */
+  enoughSamples: boolean;
 }
 
 interface UnavailableToolStat {
@@ -72,6 +87,39 @@ export function registerMetricsRoutes(routes: Routes, deps: ServerDeps): void {
     // Per-minute time series keyed by "YYYY-MM-DDTHH:MM" → { [tool]: ms[] }
     const minuteBuckets = new Map<string, Map<string, number[]>>();
 
+    /**
+     * Record a tool's rollup directly, bypassing the raw-duration bucket.
+     *
+     * `counts` / `errors` / `avgMs` come from SQL and cover the whole
+     * window; `durationsMs` is only the (capped) sample used to derive
+     * percentiles. Mixing the two would double-count, so aggregates are
+     * stored separately from `buckets` and merged at the end.
+     */
+    const aggregates = new Map<
+      string,
+      { calls: number; errors: number; avgMs: number; durations: number[]; lastTs: number }
+    >();
+    const bumpSamples = (
+      name: string,
+      durations: readonly number[],
+      calls: number,
+      errCount: number,
+      avgMs: number,
+      ts: number,
+    ): void => {
+      const prev = aggregates.get(name);
+      aggregates.set(name, {
+        calls: (prev?.calls ?? 0) + calls,
+        errors: (prev?.errors ?? 0) + errCount,
+        // Weighted so a future second source merges correctly.
+        avgMs: prev && prev.calls + calls > 0
+          ? (prev.avgMs * prev.calls + avgMs * calls) / (prev.calls + calls)
+          : avgMs,
+        durations: [...(prev?.durations ?? []), ...durations],
+        lastTs: Math.max(prev?.lastTs ?? 0, ts),
+      });
+    };
+
     const bump = (name: string, durMs: number, ok: boolean, ts: number): void => {
       if (!buckets.has(name)) buckets.set(name, []);
       buckets.get(name)!.push(Math.max(0, durMs));
@@ -103,21 +151,26 @@ export function registerMetricsRoutes(routes: Routes, deps: ServerDeps): void {
     // with names like "task_failed" that users don't recognise as
     // tools, and their timings reflect background work rather than
     // response latency.
-    const PUBLIC_API_LOG_TOOLS = new Set(["memos_search", "memory_search", "memory_add"]);
-    // Same convention as the `listTraces` call below (#2131): the tool
-    // panel folds api_logs entries and trace tool-calls into a single
-    // aggregation, so both feeds must be scoped identically. Passing
-    // `includeAllNamespaces: true` here keeps them aligned even if a
-    // future per-namespace write path lands on api_logs.
-    const { logs } = await deps.core.listApiLogs({
-      limit: 5_000,
-      offset: 0,
-      includeAllNamespaces: true,
+    const PUBLIC_API_LOG_TOOLS = ["memos_search", "memory_search", "memory_add"] as const;
+    // Aggregate in SQL over the window rather than paging rows into JS.
+    // `listApiLogs` clamps to 500 rows, which silently truncated every
+    // window beyond ~1h (see the file header). The repo method returns the
+    // full per-tool counts plus a newest-first duration sample for the
+    // percentiles, so the numbers no longer depend on any page limit.
+    const apiLogAggregates = await deps.core.aggregateApiLogsByTool({
+      since: sinceMs,
+      toolNames: PUBLIC_API_LOG_TOOLS,
+      maxDurationsPerTool: 2_000,
     });
-    for (const lg of logs) {
-      if (lg.calledAt < sinceMs) continue;
-      if (!PUBLIC_API_LOG_TOOLS.has(lg.toolName)) continue;
-      bump(lg.toolName, lg.durationMs, lg.success, lg.calledAt);
+    for (const agg of apiLogAggregates) {
+      bumpSamples(
+        agg.toolName,
+        agg.durationsMs,
+        agg.calls,
+        agg.errors,
+        agg.avgMs,
+        agg.lastTs,
+      );
     }
 
     // 2. External tool calls embedded in traces — covers bash / grep /
@@ -147,20 +200,53 @@ export function registerMetricsRoutes(routes: Routes, deps: ServerDeps): void {
     }
 
     const tools: ToolStat[] = [];
+
+    // (a) Tools whose counts came from SQL (`api_logs`). `calls`, `errors`
+    //     and `avgMs` are authoritative — they cover the full window. Only
+    //     the percentile *sample* is capped, which is fine and is why
+    //     `enoughSamples` is carried through to the UI.
+    for (const [name, agg] of aggregates) {
+      // Fold in any trace-derived observations for the same tool so the
+      // panel still shows one row per tool rather than two.
+      const extra = buckets.get(name) ?? [];
+      const sample = [...agg.durations, ...extra].sort((a, b) => a - b);
+      const calls = agg.calls + extra.length;
+      const summary = latencySummary(sample, calls);
+      tools.push({
+        name,
+        calls,
+        errors: agg.errors + (errors.get(name) ?? 0),
+        avgMs: Math.round(
+          calls > 0
+            ? (agg.avgMs * agg.calls +
+                extra.reduce((s, v) => s + v, 0)) / calls
+            : 0,
+        ),
+        p50Ms: Math.round(summary.p50Ms),
+        p95Ms: Math.round(summary.p95Ms),
+        lastTs: Math.max(agg.lastTs, lastTs.get(name) ?? 0),
+        enoughSamples: summary.enoughSamples,
+      });
+    }
+
+    // (b) Tools that only appeared in traces (bash / grep / web / …).
     for (const [name, durs] of buckets) {
+      if (aggregates.has(name)) continue;
       durs.sort((a, b) => a - b);
       const n = durs.length;
-      const avg = n > 0 ? durs.reduce((s, v) => s + v, 0) / n : 0;
-      const p50 = n > 0 ? durs[Math.floor(n * 0.5)]! : 0;
-      const p95 = n > 0 ? durs[Math.min(n - 1, Math.floor(n * 0.95))]! : 0;
+      // Percentiles come from `percentile()` (linear interpolation). The
+      // previous inline `durs[floor(n * q)]` returned the MAXIMUM for
+      // n = 2 and collapsed p50/p95 onto the single sample for n = 1.
+      const summary = latencySummary(durs, n);
       tools.push({
         name,
         calls: n,
         errors: errors.get(name) ?? 0,
-        avgMs: Math.round(avg),
-        p50Ms: Math.round(p50),
-        p95Ms: Math.round(p95),
+        avgMs: Math.round(summary.avgMs),
+        p50Ms: Math.round(summary.p50Ms),
+        p95Ms: Math.round(summary.p95Ms),
         lastTs: lastTs.get(name) ?? 0,
+        enoughSamples: summary.enoughSamples,
       });
     }
     tools.sort((a, b) => b.calls - a.calls);

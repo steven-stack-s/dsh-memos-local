@@ -3284,6 +3284,30 @@ export function createMemoryCore(handle, home, pkgVersion, options = {}) {
         }
         return out;
     }
+    // ─── api_logs aggregation ──
+    /**
+     * SQL-side per-tool rollup over a time window.
+     *
+     * `listApiLogs` is a *paged* API and clamps to 500 rows, so aggregating
+     * through it truncated every window beyond ~1h — the Analytics tool panel
+     * reported 12 `memory_add` calls for a 24h window whose real count was 61.
+     * Delegating to the repo lets COUNT/SUM/AVG run in SQLite across the whole
+     * window regardless of table size.
+     *
+     * Not namespace-scoped, matching `listApiLogs`: the write path does not
+     * stamp owner columns on `api_logs` today, so every row is effectively
+     * cross-namespace. The parameter surface stays explicit so a
+     * per-namespace write can be added without changing callers.
+     */
+    async function aggregateApiLogsByTool(input) {
+        ensureLive();
+        return handle.repos.apiLogs.aggregateByTool({
+            since: input?.since,
+            until: input?.until,
+            toolNames: input?.toolNames,
+            maxDurationsPerTool: input?.maxDurationsPerTool,
+        });
+    }
     // ─── Skills ──
     async function listSkills(input) {
         ensureLive();
@@ -4341,6 +4365,7 @@ export function createMemoryCore(handle, home, pkgVersion, options = {}) {
         listTraces,
         countTraces,
         listApiLogs,
+        aggregateApiLogsByTool,
         listSkills,
         countSkills,
         getSkill,

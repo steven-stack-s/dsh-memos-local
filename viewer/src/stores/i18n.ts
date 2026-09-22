@@ -176,7 +176,6 @@ const en = {
   "analytics.tools.title": "Tool response time",
   "analytics.tools.subtitle":
     "Per-tool response time and failure counts over the selected time range.",
-
   "restart.restarting": "Configuration saved. Service is restarting…",
   "restart.restarting.hermes":
     "Configuration saved. Closing the current Hermes session…",
@@ -1114,7 +1113,6 @@ const zh: Record<TranslationKey, string> = {
 
   "analytics.tools.title": "工具响应耗时",
   "analytics.tools.subtitle": "所选时间窗口内，各工具的延迟和失败次数。来源：最近的记忆行。",
-
   "restart.restarting": "配置已保存，服务正在重启…",
   "restart.restarting.hermes": "配置已保存，正在关闭当前 Hermes 会话…",
   "restart.waitingUp": "正在等待服务重新上线…",

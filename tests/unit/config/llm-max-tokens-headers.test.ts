@@ -41,19 +41,26 @@ describe("resolveConfig llm.maxTokens + llm.headers", () => {
     expect(warnings).toEqual([]);
   });
 
-  it("declares llm.maxTokens with a default of 2048", () => {
+  it("declares llm.maxTokens with a default of 8192", () => {
     // Raised from 1024: the summary slot also serves the structured-JSON
     // calls (reflection / scoring / L3 abstraction), and a reasoning model
     // spends output tokens before it emits any JSON. At 1024 the budget was
     // frequently exhausted mid-object, which surfaced as
     // \`llm_output_malformed: ... reached the token cap before completing\`
     // and painted the Overview model card red even though the call had a
-    // working fallback. 2048 keeps the raise conservative (half of the
-    // l3Llm / skillEvolver budget of 4096) because this slot is on the
-    // turn path, where latency and cost matter more.
-    expect(DEFAULT_CONFIG.llm.maxTokens).toBe(2048);
+    // working fallback.
+    //
+    // The number is now data-backed rather than a guess. Replaying the real
+    // L3 abstraction prompt against the host LLM with six live policies
+    // produced 11 331 output characters in **2 707 completion tokens**
+    // (11.8 s, valid JSON) — above the old 2048, which is why the
+    // 1024 → 2048 raise did not stop the errors. Stored world models reach
+    // ~24 900 characters, so 8192 leaves headroom for the largest clusters.
+    //
+    // A ceiling, not a target: short calls stop when they finish.
+    expect(DEFAULT_CONFIG.llm.maxTokens).toBe(8192);
     const cfg = resolveConfig({});
-    expect(cfg.llm.maxTokens).toBe(2048);
+    expect(cfg.llm.maxTokens).toBe(8192);
   });
 
   it("declares llm.headers defaulting to an empty map", () => {
