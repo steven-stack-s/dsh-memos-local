@@ -3,6 +3,36 @@
 Notable changes to `dsh-memos-local`. Maintained by hand; for the full
 per-commit history use `git log` or the GitHub releases page.
 
+## [v2.0.20-dsh.1]
+
+### Upstream sync
+
+- Imported upstream MemOS **2.0.20** memory-evolution fixes (plugin subtree,
+  commits `77c563cb..0f3265a5`): skill verification retry loops stopped with a
+  6h cooldown default; L3 clustering bounded by `maxPoliciesPerCluster` (20)
+  and `maxPromptChars` (32k) with failure backoff and quarantine; dedicated
+  skill-evolver LLM now wired into L2 induction and skill crystallization.
+- Storage migration `019-policy-metadata.sql` plus policy-metadata backfill.
+- Hermes/OpenClaw installers and adapters remain out of scope for this fork.
+
+### Added — tool-response-duration analytics
+
+- `core/util/percentile.ts`: linear-interpolated p50/p95 (replaces inline floor
+  indexing, which reported p50 above the mean and a full-width p95 on a single
+  sample); percentiles are suppressed below `MIN_SAMPLES_FOR_PERCENTILE`.
+- `core/storage/repos/api_logs.ts`: `aggregateByTool()` computes COUNT/SUM/AVG
+  inside SQLite over the requested window, replacing the 500-row `limit`
+  truncation that skewed the numbers to roughly the last hour.
+- `server/routes/metrics.ts`: tool-duration aggregate endpoint with
+  window/pagination parameters; Analytics view gains 5/15/30/60-minute window
+  switching (default 5 minutes, persisted) plus p50/p95 bars and per-tool detail.
+
+### Fixed
+
+- `llm.maxTokens` raised 2048 → 8192: the structured-JSON slot also carries L3
+  world-model abstraction, which needs thousands of output tokens; the old
+  ceiling surfaced as `llm_output_malformed` and painted the model card red.
+
 ## [v2.0.19-dsh.4]
 
 ### Fixed — the summary and skill-evolver model cards reported "Not configured"
