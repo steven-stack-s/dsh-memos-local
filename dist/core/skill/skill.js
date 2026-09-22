@@ -116,6 +116,7 @@ export async function runSkill(input, deps) {
                 kind: "skill.verification.failed",
                 at: nowMs(),
                 skillId: "sk_placeholder",
+                policyId: decision.policy.id,
                 reason: verdict.reason ?? "verify-failed",
             });
             continue;

@@ -22,7 +22,7 @@ export interface ClusterInput {
     policies: readonly PolicyRow[];
 }
 export interface ClusterDeps {
-    config: Pick<L3Config, "clusterMinSimilarity" | "minPolicies">;
+    config: Pick<L3Config, "clusterMinSimilarity" | "minPolicies" | "maxPoliciesPerCluster">;
 }
 export declare function domainKeyOf(policy: PolicyRow): {
     key: PolicyClusterKey;

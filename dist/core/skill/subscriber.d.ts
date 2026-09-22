@@ -7,10 +7,10 @@
  *   - `l2.policy.induced`        → `runSkill({ trigger, policyId })`
  *   - `l2.policy.status_changed` → `runSkill({ trigger, policyId })` when
  *                                  the new status is `active`
- *   - `reward.updated`           → `runSkill({ trigger: "reward.updated" })`
- *                                  — evaluates every policy referenced by
- *                                  the updated episode. Also drives the η
- *                                  drift adjustment on existing skills.
+ *   - `reward.updated`           → one scoped run per policy linked to the
+ *                                  updated episode. Each policy has its own
+ *                                  cooldown and pending queue entry. Also
+ *                                  drives η adjustment on existing skills.
  *
  * The handle returns `runOnce` for manual runs (used by the CLI / viewer
  * rebuild button) and `applyFeedback` for explicit skill feedback.

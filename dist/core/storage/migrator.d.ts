@@ -24,6 +24,8 @@ export interface MigrationsResult {
     }>;
     skipped: number;
     total: number;
+    /** Number of legacy policy rows healed during this boot (bounded batch). */
+    metadataBackfilled: number;
 }
 /**
  * Resolve the `migrations/` directory next to this file. Works both when the

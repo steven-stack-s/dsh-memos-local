@@ -299,6 +299,10 @@ export declare const ConfigSchema: import("@sinclair/typebox").TObject<{
              * are ignored (policies too disparate to share a world model).
              */
             clusterMinSimilarity: import("@sinclair/typebox").TNumber;
+            /** Maximum policies included in one L3 abstraction prompt. */
+            maxPoliciesPerCluster: import("@sinclair/typebox").TNumber;
+            /** Hard total character cap for one L3 abstraction prompt. */
+            maxPromptChars: import("@sinclair/typebox").TNumber;
             /** Chars of L2 body handed to `l3.abstraction`. */
             policyCharCap: import("@sinclair/typebox").TNumber;
             /** Chars of trace body handed per evidence trace. */

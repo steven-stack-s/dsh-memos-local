@@ -9,5 +9,6 @@ export declare function makeTracePolicyLinksRepo(db: StorageDb): {
     }): void;
     getWithTraceIds(policyId: PolicyId): TraceId[];
     getLinkedEpisodeIds(policyId: PolicyId): EpisodeId[];
+    getLinkedPolicyIds(episodeId: EpisodeId): PolicyId[];
 };
 //# sourceMappingURL=trace-policy-links.d.ts.map

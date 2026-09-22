@@ -12,6 +12,7 @@
  */
 export { openDb, markReady } from "./connection.js";
 export { runMigrations, runMigrationsForPath, defaultMigrationsDir, discoverMigrations, } from "./migrator.js";
+export { backfillLegacyPolicyMetadata } from "./policy-metadata-backfill.js";
 export { withRetry, withSavepoint, buildInsert, buildUpdate, chunkIn, buildInClause, isBetterSqliteError, } from "./tx.js";
 export { encodeVector, decodeVector, cosine, cosinePrenormed, dot, norm2, topKCosine, scanAndTopK, } from "./vector.js";
 export { makeRepos } from "./repos/index.js";

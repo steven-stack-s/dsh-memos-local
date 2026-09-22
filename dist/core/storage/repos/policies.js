@@ -32,6 +32,7 @@ const COLUMNS = [
     "share_target",
     "shared_at",
     "edited_at",
+    "metadata_json",
 ];
 export function makePoliciesRepo(db) {
     const insert = db.prepare(buildInsert({ table: "policies", columns: COLUMNS }));
@@ -331,6 +332,7 @@ function rowToParams(row) {
         share_target: row.share?.target ?? null,
         shared_at: row.share?.sharedAt ?? null,
         edited_at: row.editedAt ?? null,
+        metadata_json: row.metadata ? toJsonText(row.metadata) : null,
     };
 }
 function mapRow(r) {
@@ -367,6 +369,31 @@ function mapRow(r) {
             }
             : null,
         editedAt: r.edited_at,
+        metadata: parsePolicyMetadata(r.metadata_json),
+    };
+}
+function parsePolicyMetadata(raw) {
+    if (!raw)
+        return undefined;
+    const value = fromJsonText(raw, null);
+    if (!value || value.version !== 1)
+        return undefined;
+    const language = value.language;
+    if (!['zh', 'en', 'other', 'mixed', 'unknown'].includes(String(language)))
+        return undefined;
+    const list = (input) => Array.isArray(input)
+        ? Array.from(new Set(input.filter((v) => typeof v === 'string' && !!v.trim()).map((v) => v.trim().slice(0, 64))))
+        : [];
+    const sourceSignature = typeof value.sourceSignature === 'string' && value.sourceSignature.trim()
+        ? value.sourceSignature.trim().slice(0, 256)
+        : undefined;
+    return {
+        version: 1,
+        language: language,
+        domainTags: list(value.domainTags),
+        toolNames: list(value.toolNames),
+        errorCodes: list(value.errorCodes),
+        ...(sourceSignature ? { sourceSignature } : {}),
     };
 }
 function policySearchMeta(r) {

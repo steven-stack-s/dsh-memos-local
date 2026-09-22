@@ -35,8 +35,13 @@ export declare function languageSteeringLine(lang: PromptLanguage): string;
  * Heuristic:
  *   - Count CJK Unified Ideographs (U+4E00..U+9FFF) as `zh`.
  *   - Count ASCII letters A-Z/a-z as `en`.
- *   - If CJK accounts for more than `zhRatioThreshold` of counted
- *     CJK+ASCII signal, pick `zh`.
+ *   - Treat Japanese kana as an explicit non-Chinese signal. This keeps
+ *     Japanese prompts from being mistaken for Chinese just because they
+ *     contain a few shared Han characters.
+ *   - CJK characters carry a small weight because technical identifiers
+ *     (package names, commands, file paths) can contribute many ASCII
+ *     characters inside an otherwise Chinese sentence. If weighted CJK
+ *     accounts for more than `zhRatioThreshold` of the signal, pick `zh`.
  *   - Otherwise pick `en`.
  *
  * This intentionally treats Japanese / Korean prompts with filenames,

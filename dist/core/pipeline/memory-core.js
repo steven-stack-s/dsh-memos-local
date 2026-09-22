@@ -207,7 +207,7 @@ export async function bootstrapMemoryCoreFull(options) {
         });
         llm = null;
     }
-    // Build a dedicated LLM for the reflection phase from skillEvolver
+    // Build a dedicated LLM for L2 induction and skills from skillEvolver
     // config when the user has configured a stronger model there. Falls
     // back to the main `llm` when skillEvolver.model is blank.
     let reflectLlm = null;

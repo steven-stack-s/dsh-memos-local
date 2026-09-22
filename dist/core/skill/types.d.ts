@@ -170,6 +170,7 @@ export interface SkillVerificationPassedEvent extends SkillEventBase<"skill.veri
 }
 export interface SkillVerificationFailedEvent extends SkillEventBase<"skill.verification.failed"> {
     skillId: SkillId;
+    policyId: string;
     reason: string;
 }
 export interface SkillModelRefusalDetails {

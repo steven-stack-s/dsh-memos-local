@@ -23,8 +23,8 @@
 import type { Logger } from "../../logger/types.js";
 import type { LlmClient } from "../../llm/index.js";
 import type { Repos } from "../../storage/repos/index.js";
-import type { WorldModelId } from "../../types.js";
-import type { L3Config, L3EventBus, L3ProcessInput, L3ProcessResult } from "./types.js";
+import type { PolicyId, WorldModelId } from "../../types.js";
+import type { L3Config, L3EventBus, L3ProcessInput, L3ProcessResult, PolicyClusterKey } from "./types.js";
 export interface RunL3Deps {
     repos: Pick<Repos, "embeddingRetryQueue" | "policies" | "traces" | "worldModel" | "kv">;
     llm: LlmClient | null;
@@ -33,6 +33,8 @@ export interface RunL3Deps {
     config: L3Config;
 }
 export declare function runL3(input: L3ProcessInput, deps: RunL3Deps): Promise<L3ProcessResult>;
+/** Clear a retry/quarantine record after a config or prompt fix. */
+export declare function clearL3RetryState(clusterKey: PolicyClusterKey, policyIds: readonly PolicyId[], kv: Repos["kv"]): void;
 export declare function adjustConfidence(worldModelId: WorldModelId, polarity: "positive" | "negative", deps: Pick<RunL3Deps, "repos" | "config" | "log" | "bus">, now?: number): {
     previous: number;
     next: number;

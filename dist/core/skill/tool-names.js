@@ -17,7 +17,21 @@ export function extractToolNames(traces) {
             if (name && !IGNORED_NAMES.has(name))
                 out.add(name);
             if (typeof tc.input === "string") {
-                const first = tc.input.trim().split(/\s+/)[0]?.toLowerCase();
+                const raw = tc.input.trim();
+                // JSON tool arguments are payload, not shell commands.  Taking the
+                // first whitespace token from them produces entries such as `{"code":`
+                // and poisons the EVIDENCE_TOOLS whitelist.
+                let parsed;
+                try {
+                    parsed = JSON.parse(raw);
+                }
+                catch {
+                    parsed = undefined;
+                }
+                if (parsed !== undefined) {
+                    continue;
+                }
+                const first = raw.split(/\s+/)[0]?.toLowerCase();
                 if (first && first.length >= 2)
                     out.add(first);
             }

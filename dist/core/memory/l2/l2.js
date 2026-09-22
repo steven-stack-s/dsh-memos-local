@@ -214,6 +214,7 @@ export async function runL2(input, deps) {
                 evidenceTraces: traces,
                 inducedBy: `${L2_INDUCTION_PROMPT.id}.v${L2_INDUCTION_PROMPT.version}`,
                 now: input.now ?? Date.now(),
+                sourceSignature: bucket.signature,
             });
             const owner = ownerFromTraces(traces);
             policy.ownerAgentKind = owner.ownerAgentKind;
@@ -562,6 +563,7 @@ function mergePolicyEvidence(existing, incoming, now) {
             ...incoming.sourceEpisodeIds,
         ]),
         vec: existing.vec ?? incoming.vec,
+        metadata: existing.metadata ?? incoming.metadata,
         updatedAt: now,
     };
 }

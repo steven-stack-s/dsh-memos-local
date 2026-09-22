@@ -25,6 +25,10 @@ export interface L3Config {
     minPolicySupport: number;
     /** Cosine floor for two L2s to share a cluster. */
     clusterMinSimilarity: number;
+    /** Maximum policies admitted to one abstraction prompt. */
+    maxPoliciesPerCluster?: number;
+    /** Hard total character cap for one abstraction prompt. */
+    maxPromptChars?: number;
     /** Char cap for each L2 body section handed to the prompt. */
     policyCharCap: number;
     /** Char cap for each L1 evidence trace handed to the prompt. */
@@ -110,7 +114,7 @@ export type L3AbstractionDraftResult = {
     draft: L3AbstractionDraft;
 } | {
     ok: false;
-    reason: "llm_disabled" | "llm_failed" | "draft_invalid";
+    reason: "llm_disabled" | "llm_failed" | "draft_invalid" | "prompt_too_large";
     detail?: string;
 };
 export interface AbstractionResult {
@@ -123,7 +127,7 @@ export interface AbstractionResult {
     episodeIds: EpisodeId[];
     /** Policy ids that contributed evidence. */
     policyIds: PolicyId[];
-    skippedReason: null | "too_few_policies" | "below_min_gain" | "llm_disabled" | "llm_failed" | "draft_invalid" | "cooldown" | "no_centroid" | "duplicate_of";
+    skippedReason: null | "too_few_policies" | "below_min_gain" | "llm_disabled" | "llm_failed" | "draft_invalid" | "prompt_too_large" | "quarantined" | "cooldown" | "retry_cooldown" | "no_centroid" | "duplicate_of";
     /** When `skippedReason === "duplicate_of"`, the existing WM id. */
     duplicateOfWorldId?: WorldModelId | null;
     /** When a new WM was created; null if we updated an existing one. */
@@ -194,6 +198,12 @@ export type L3Event = {
         message: string;
     };
     clusterKey?: PolicyClusterKey;
+    policyIds?: PolicyId[];
+} | {
+    kind: "l3.abstraction.skipped";
+    clusterKey: PolicyClusterKey;
+    reason: string;
+    policyIds: PolicyId[];
 };
 export type L3EventKind = L3Event["kind"];
 export type L3EventListener = (evt: L3Event) => void;

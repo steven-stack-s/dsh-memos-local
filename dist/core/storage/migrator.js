@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { now } from "../time.js";
 import { rootLogger } from "../logger/index.js";
 import { markReady } from "./connection.js";
+import { backfillLegacyPolicyMetadata } from "./policy-metadata-backfill.js";
 const log = rootLogger.child({ channel: "storage.migration" });
 const MIGRATION_FILE_PATTERN = /^(\d{3})-([a-z0-9][a-z0-9-]*)\.sql$/i;
 /**
@@ -88,6 +89,17 @@ export function runMigrations(db, dir = defaultMigrationsDir()) {
                 skipped++;
                 continue;
             }
+            // Some recovery/compatibility tests (and a few hand-created legacy
+            // databases) contain only the migration bookkeeping tables. The policy
+            // metadata migration is additive and has nothing to do when the parent
+            // policies table is absent; record it as applied so boot can continue.
+            // Normal databases always have policies from 001-initial.sql, so this
+            // branch never bypasses the real ALTER TABLE upgrade.
+            if (file.version === 19 && !tableExists(db, "policies")) {
+                db.prepare(`INSERT INTO schema_migrations (version, name, applied_at) VALUES (@version, @name, @applied_at)`).run({ version: file.version, name: file.name, applied_at: now() });
+                applied.push({ version: file.version, name: file.name, durationMs: 0 });
+                continue;
+            }
             const t0 = now();
             db.tx(() => {
                 applyMigration(db, file);
@@ -108,13 +120,17 @@ export function runMigrations(db, dir = defaultMigrationsDir()) {
             db.raw.unsafeMode(false);
     }
     ensureHubSharingSearchColumns(db);
+    const metadataBackfilled = backfillLegacyPolicyMetadata(db);
+    if (metadataBackfilled > 0) {
+        log.info("policy-metadata.backfilled", { count: metadataBackfilled });
+    }
     markReady(db);
     log.info("migrations.summary", {
         total: allFiles.length,
         applied: applied.length,
         skipped,
     });
-    return { applied, skipped, total: allFiles.length };
+    return { applied, skipped, total: allFiles.length, metadataBackfilled };
 }
 /**
  * Detect migrations that need `SQLITE_DBCONFIG_DEFENSIVE` relaxed. We
@@ -177,6 +193,17 @@ function applyMigration(db, file) {
         // `traces` table; the index is meaningless there and must not fail boot.
         if (tableExists(db, "traces")) {
             db.exec(fs.readFileSync(file.fullPath, "utf8"));
+        }
+        return;
+    }
+    if (file.version === 19 && file.name === "policy-metadata") {
+        // 019 is intentionally idempotent beyond the schema_migrations marker:
+        // a process can crash after ALTER TABLE but before recording the marker.
+        // Re-running must detect the already-present column instead of failing
+        // with "duplicate column name".
+        if (tableExists(db, "policies")) {
+            ensureColumn(db, "policies", "metadata_json", "TEXT");
+            db.exec(`CREATE INDEX IF NOT EXISTS idx_policies_metadata ON policies(metadata_json)`);
         }
         return;
     }

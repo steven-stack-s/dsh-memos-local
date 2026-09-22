@@ -26,6 +26,10 @@ import { abstractDraft, buildWorldModelRow } from "./abstract.js";
 import { clusterPolicies } from "./cluster.js";
 import { chooseMergeTarget, gatherMergeCandidates, mergeForUpdate, } from "./merge.js";
 const KV_COOLDOWN_PREFIX = "l3.lastRun.";
+const KV_RETRY_PREFIX = "l3.retry.";
+const FAILURE_BACKOFF_MS = [5 * 60_000, 30 * 60_000, 2 * 60 * 60_000, 6 * 60 * 60_000];
+const RETRY_STATE_VERSION = 2;
+const MAX_FAILURE_ATTEMPTS = FAILURE_BACKOFF_MS.length;
 // ─── Public entry ──────────────────────────────────────────────────────────
 export async function runL3(input, deps) {
     const { repos, config, log, bus } = deps;
@@ -53,6 +57,7 @@ export async function runL3(input, deps) {
             config: {
                 clusterMinSimilarity: config.clusterMinSimilarity,
                 minPolicies: config.minPolicies,
+                maxPoliciesPerCluster: config.maxPoliciesPerCluster ?? 20,
             },
         });
         if (input.domainTagsFilter && input.domainTagsFilter.length > 0) {
@@ -82,6 +87,12 @@ export async function runL3(input, deps) {
         }
         if (!cluster.centroidVec) {
             abstractions.push(skipped(cluster, "no_centroid"));
+            emit(bus, {
+                kind: "l3.abstraction.skipped",
+                clusterKey: cluster.key,
+                reason: "no_centroid",
+                policyIds: cluster.policies.map((p) => p.id),
+            });
             continue;
         }
         if (isInCooldown(cluster, repos.kv, config.cooldownDays, now)) {
@@ -90,6 +101,21 @@ export async function runL3(input, deps) {
                 domainTags: cluster.domainTags,
             });
             abstractions.push(skipped(cluster, "cooldown"));
+            continue;
+        }
+        const retry = readRetryState(repos.kv.get(retryKey(cluster), null));
+        if (retry?.quarantined) {
+            abstractions.push(skipped(cluster, "quarantined"));
+            emit(bus, {
+                kind: "l3.abstraction.skipped",
+                clusterKey: cluster.key,
+                reason: "quarantined",
+                policyIds: cluster.policies.map((p) => p.id),
+            });
+            continue;
+        }
+        if (retry && retry.nextRetryAt > now) {
+            abstractions.push(skipped(cluster, "retry_cooldown"));
             continue;
         }
         const evidenceByPolicy = loadEvidence(cluster, repos, config.traceEvidencePerPolicy);
@@ -102,16 +128,51 @@ export async function runL3(input, deps) {
         // manual / rebuild runs still get a coherent grouping.
         const triggerEpisodeId = input.episodeId ?? episodeIds[0];
         const t0 = Date.now();
-        const draftRes = await abstractDraft({ cluster, evidenceByPolicy, episodeId: triggerEpisodeId }, { llm: deps.llm, log: abstractLog, config });
+        const batchSize = Math.max(1, config.maxPoliciesPerCluster ?? 20);
+        const drafts = [];
+        let draftRes = null;
+        for (let offset = 0; offset < cluster.policies.length; offset += batchSize) {
+            const batchPolicies = cluster.policies.slice(offset, offset + batchSize);
+            const batchPolicyIds = new Set(batchPolicies.map((policy) => policy.id));
+            const batchEvidence = new Map(Array.from(evidenceByPolicy.entries()).filter(([policyId]) => batchPolicyIds.has(policyId)));
+            const batchCluster = {
+                ...cluster,
+                policies: batchPolicies,
+            };
+            const batchResult = await abstractDraft({ cluster: batchCluster, evidenceByPolicy: batchEvidence, episodeId: triggerEpisodeId }, { llm: deps.llm, log: abstractLog, config });
+            if (!batchResult.ok) {
+                draftRes = batchResult;
+                break;
+            }
+            drafts.push({ draft: batchResult.draft, policyCount: batchPolicies.length });
+        }
+        draftRes ??= { ok: true, draft: combineBatchDrafts(drafts) };
         timings.abstract += Date.now() - t0;
         if (!draftRes.ok) {
-            abstractions.push(skipped(cluster, draftRes.reason, { episodeIds, policyIds: cluster.policies.map((p) => p.id) }));
-            emit(bus, {
-                kind: "l3.failed",
-                stage: "abstract",
-                error: { code: draftRes.reason, message: draftRes.detail ?? "" },
-                clusterKey: cluster.key,
-            });
+            if (draftRes.reason === "llm_failed" ||
+                draftRes.reason === "draft_invalid" ||
+                draftRes.reason === "prompt_too_large") {
+                recordFailure(cluster, repos.kv, now, draftRes.reason, draftRes.reason === "prompt_too_large");
+            }
+            const policyIds = cluster.policies.map((p) => p.id);
+            abstractions.push(skipped(cluster, draftRes.reason, { episodeIds, policyIds }));
+            if (draftRes.reason === "prompt_too_large") {
+                emit(bus, {
+                    kind: "l3.abstraction.skipped",
+                    clusterKey: cluster.key,
+                    reason: draftRes.reason,
+                    policyIds,
+                });
+            }
+            else {
+                emit(bus, {
+                    kind: "l3.failed",
+                    stage: "abstract",
+                    error: { code: draftRes.reason, message: draftRes.detail ?? "" },
+                    clusterKey: cluster.key,
+                    policyIds,
+                });
+            }
             continue;
         }
         const t1 = Date.now();
@@ -120,6 +181,7 @@ export async function runL3(input, deps) {
             lookup: repos.worldModel,
             config,
         });
+        let persisted = false;
         if (decision.kind === "update") {
             const patch = mergeForUpdate({
                 existing: decision.target,
@@ -192,6 +254,7 @@ export async function runL3(input, deps) {
                     policyIds: patch.policyIds,
                     confidence: bumped,
                 });
+                persisted = true;
             }
             catch (err) {
                 warnings.push(stageWarn("merge", err, { clusterKey: cluster.key }));
@@ -243,12 +306,19 @@ export async function runL3(input, deps) {
                     policyIds: wm.policyIds,
                     confidence: wm.confidence,
                 });
+                persisted = true;
             }
             catch (err) {
                 warnings.push(stageWarn("insert", err, { clusterKey: cluster.key }));
             }
         }
-        markCooldown(cluster, repos.kv, now);
+        if (persisted) {
+            markCooldown(cluster, repos.kv, now);
+            repos.kv.del(retryKey(cluster));
+        }
+        else {
+            recordFailure(cluster, repos.kv, now);
+        }
         timings.persist += Date.now() - t1;
     }
     const completedAt = Date.now();
@@ -290,6 +360,39 @@ function stageWarn(stage, err, detail) {
 }
 function worldModelVectorText(title, body) {
     return [title.trim(), body.trim()].filter(Boolean).join("\n\n") || "(empty)";
+}
+function combineBatchDrafts(drafts) {
+    const first = drafts[0];
+    const weightedPolicyCount = drafts.reduce((sum, item) => sum + item.policyCount, 0);
+    return {
+        title: first.draft.title,
+        domainTags: dedupeStrings(drafts.flatMap((item) => item.draft.domainTags)),
+        environment: combineDraftEntries(drafts.flatMap((item) => item.draft.environment)),
+        inference: combineDraftEntries(drafts.flatMap((item) => item.draft.inference)),
+        constraints: combineDraftEntries(drafts.flatMap((item) => item.draft.constraints)),
+        body: dedupeStrings(drafts.map((item) => item.draft.body).filter(Boolean)).join("\n\n---\n\n"),
+        confidence: drafts.reduce((sum, item) => sum + item.draft.confidence * item.policyCount, 0) / weightedPolicyCount,
+        supersedesWorldIds: Array.from(new Set(drafts.flatMap((item) => item.draft.supersedesWorldIds ?? []))),
+    };
+}
+function combineDraftEntries(entries) {
+    const combined = new Map();
+    for (const entry of entries) {
+        const key = `${entry.label.trim().toLowerCase()}\u0000${entry.description.trim().toLowerCase()}`;
+        const previous = combined.get(key);
+        if (!previous) {
+            combined.set(key, { ...entry, evidenceIds: dedupeStrings(entry.evidenceIds ?? []) });
+            continue;
+        }
+        previous.evidenceIds = dedupeStrings([
+            ...(previous.evidenceIds ?? []),
+            ...(entry.evidenceIds ?? []),
+        ]);
+    }
+    return Array.from(combined.values());
+}
+function dedupeStrings(values) {
+    return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 function skipped(cluster, reason, extra) {
     return {
@@ -353,6 +456,49 @@ function clamp01(n) {
 function cooldownKey(cluster) {
     const primary = cluster.domainTags[0] ?? cluster.key;
     return `${KV_COOLDOWN_PREFIX}${primary}`;
+}
+function retryKey(cluster) {
+    return retryKeyFor(cluster.key, cluster.policies.map((p) => p.id));
+}
+function retryKeyFor(clusterKey, policyIds) {
+    const members = policyIds.map((id) => String(id)).sort().join(",");
+    return `${KV_RETRY_PREFIX}${clusterKey}:${members}`;
+}
+/** Clear a retry/quarantine record after a config or prompt fix. */
+export function clearL3RetryState(clusterKey, policyIds, kv) {
+    kv.del(retryKeyFor(clusterKey, policyIds));
+}
+function recordFailure(cluster, kv, now, reason, quarantine = false) {
+    const previous = readRetryState(kv.get(retryKey(cluster), null));
+    const failures = Math.min((previous?.failures ?? 0) + 1, MAX_FAILURE_ATTEMPTS);
+    const delay = FAILURE_BACKOFF_MS[failures - 1] ?? FAILURE_BACKOFF_MS[FAILURE_BACKOFF_MS.length - 1];
+    kv.set(retryKey(cluster), {
+        version: RETRY_STATE_VERSION,
+        failures,
+        nextRetryAt: now + delay,
+        quarantined: quarantine || failures >= MAX_FAILURE_ATTEMPTS,
+        ...(reason ? { reason } : {}),
+    });
+}
+function readRetryState(raw) {
+    if (!raw || typeof raw !== "object")
+        return null;
+    const row = raw;
+    const failures = typeof row.failures === "number" && Number.isFinite(row.failures)
+        ? Math.max(0, Math.floor(row.failures))
+        : 0;
+    const nextRetryAt = typeof row.nextRetryAt === "number" && Number.isFinite(row.nextRetryAt)
+        ? row.nextRetryAt
+        : 0;
+    if (failures <= 0 && nextRetryAt <= 0)
+        return null;
+    return {
+        version: typeof row.version === "number" ? row.version : 1,
+        failures,
+        nextRetryAt,
+        quarantined: row.quarantined === true,
+        reason: typeof row.reason === "string" ? row.reason : undefined,
+    };
 }
 function isInCooldown(cluster, kv, cooldownDays, now) {
     if (cooldownDays <= 0)

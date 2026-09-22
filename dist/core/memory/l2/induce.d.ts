@@ -51,5 +51,6 @@ export declare function buildPolicyRow(args: {
     inducedBy: string;
     now?: number;
     id?: PolicyId;
+    sourceSignature?: string;
 }): PolicyRow;
 //# sourceMappingURL=induce.d.ts.map

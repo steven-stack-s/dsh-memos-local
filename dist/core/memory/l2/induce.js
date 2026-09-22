@@ -91,6 +91,7 @@ export function buildPolicyRow(args) {
         gain: 0,
         status: "candidate",
         sourceEpisodeIds: Array.from(new Set(args.episodeIds)),
+        sourceTraceIds: Array.from(new Set(args.evidenceTraces.map((trace) => trace.id))),
         inducedBy: args.inducedBy,
         // Fresh policy starts without learned guidance — populated by the
         // decision-repair pipeline as user feedback / failure bursts arrive.
@@ -98,7 +99,53 @@ export function buildPolicyRow(args) {
         vec: vec,
         createdAt: now,
         updatedAt: now,
+        metadata: derivePolicyMetadata(args.evidenceTraces, args.sourceSignature),
     };
+}
+function derivePolicyMetadata(traces, sourceSignature) {
+    const domainTags = uniqueStrings(traces.flatMap((t) => t.tags ?? []));
+    const toolNames = uniqueStrings(traces.flatMap((t) => (t.toolCalls ?? []).map((c) => c.name ?? "")));
+    const errorCodes = uniqueStrings(traces.flatMap((t) => {
+        const text = [
+            t.agentText,
+            t.reflection ?? "",
+            ...(t.toolCalls ?? []).map((c) => typeof c.output === "string" ? c.output : ""),
+        ].join(" ");
+        return Array.from(text.matchAll(/\b[A-Z][A-Z0-9]{2,}_[A-Z0-9_]+\b/g), (m) => m[0]);
+    }));
+    let zh = 0;
+    let en = 0;
+    for (const t of traces) {
+        for (const s of [t.userText, t.agentText, t.reflection ?? ""]) {
+            for (const ch of s) {
+                const code = ch.charCodeAt(0);
+                if (code >= 0x4e00 && code <= 0x9fff)
+                    zh++;
+                else if ((code >= 0x41 && code <= 0x5a) ||
+                    (code >= 0x61 && code <= 0x7a))
+                    en++;
+            }
+        }
+    }
+    const total = zh + en;
+    const language = total === 0
+        ? "unknown"
+        : zh / total >= 0.7
+            ? "zh"
+            : en / total >= 0.7
+                ? "en"
+                : "mixed";
+    return {
+        version: 1,
+        language,
+        domainTags,
+        toolNames,
+        errorCodes,
+        ...(sourceSignature ? { sourceSignature } : {}),
+    };
+}
+function uniqueStrings(values) {
+    return Array.from(new Set(values.map((v) => v.trim().toLowerCase()).filter(Boolean))).slice(0, 32);
 }
 // ─── helpers ────────────────────────────────────────────────────────────────
 function packTraces(traces, charCap, label) {

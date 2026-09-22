@@ -24,7 +24,7 @@ export interface AbstractInput {
 export interface AbstractDeps {
     llm: LlmClient | null;
     log: Logger;
-    config: Pick<L3Config, "policyCharCap" | "traceCharCap" | "traceEvidencePerPolicy" | "useLlm">;
+    config: Pick<L3Config, "policyCharCap" | "traceCharCap" | "traceEvidencePerPolicy" | "useLlm" | "maxPromptChars">;
     /** Optional extra validation executed after the base validator. */
     validate?: (d: L3AbstractionDraft) => void;
 }
