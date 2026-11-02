@@ -124,6 +124,7 @@ The git tag is `v` plus the version, unchanged:
 | `2.0.20-dsh.1` | `v2.0.20-dsh.1` |
 | `2.0.20-dsh.4` | `v2.0.20-dsh.4` |
 | `2.0.21-dsh.1` | `v2.0.21-dsh.1` |
+| `2.0.21-dsh.2` | `v2.0.21-dsh.2` |
 
 Both publish workflows fail if the tag does not match `package.json.version`.
 

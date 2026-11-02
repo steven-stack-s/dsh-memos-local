@@ -3,6 +3,22 @@
 Notable changes to `dsh-memos-local`. Maintained by hand; for the full
 per-commit history use `git log` or the GitHub releases page.
 
+## [v2.0.21-dsh.2]
+
+仅文档与版本号，无可执行代码变更（`dsh.1` 的 tag 先于文档更新产生，
+故按「同一基线下的 fork-only 变更递增 `dsh.N`」的约定重发一版，
+让 npm 包内附带的 README 含有运行时要求）。
+
+### Docs
+
+- README（中英）顶部声明 **Node.js >= 22** 的运行时要求：自 `v2.0.21-dsh.1`
+  起 `better-sqlite3` 固定 13.0.3（Node-API 预编译），宿主运行时在打开存储前
+  校验，Node 20 以 `MemOS requires Node.js >=22 in the actual host runtime`
+  快速失败。
+- 安装章节补充前置条件；新增「在旧运行时上固定版本」一节，说明 `latest`
+  恒指向最新发布，Node 20 用户需显式安装 `@2.0.20-dsh.4`。
+- 版本映射表补到 `2.0.21-dsh.2`。
+
 ## [v2.0.21-dsh.1]
 
 上游基线 `2.0.20` → `2.0.21`（导入 `apps/memos-local-plugin` 子树 55 文件，
