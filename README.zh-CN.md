@@ -7,6 +7,13 @@
 > 独立出来，完整保留提交历史。
 > 由 steven-stack-s 维护，专用于 DeepSeek Harness（DSH）。
 
+> **运行时要求：Node.js 22 及以上。** 自 `v2.0.21-dsh.1`（同步上游 MemOS
+> 2.0.21）起，插件要求**实际宿主进程**为 Node.js >= 22（包括 Electron 内置的
+> Node）。`better-sqlite3` 固定为 `13.0.3`，使用官方 Node-API 预编译产物，不再
+> 按 Node/Electron ABI 现场重编。宿主要求会在打开存储**之前**校验，Node 20 会
+> 直接以 `MemOS requires Node.js >=22 in the actual host runtime` 快速失败，
+> 而不是写坏数据。Node 20 用户请继续使用 `2.0.20-dsh.4` 或先升级 Node。
+
 ## 界面截图
 
 **DSH 侧边栏中的记忆面板** —— 点击左侧「记忆」即可内嵌打开 MemOS 查看器，
@@ -19,6 +26,9 @@
 ![DSH 设置中的「记忆（MemOS）」区](docs/images/dsh-memory-settings.png)
 
 ## 安装
+
+**前置条件：** 运行 DSH 的进程需为 Node.js **>= 22**（自 `v2.0.21-dsh.1`
+起 Node 20 会在启动阶段被拒绝）。用 `node -v` 确认。
 
 ### 从 npmjs 安装（推荐 —— 无需任何凭据）
 
@@ -101,6 +111,8 @@ git tag 就是 `v` + 版本号本身，不做任何变换：
 | `2.0.19-dsh.1` | `v2.0.19-dsh.1` |
 | `2.0.19-dsh.2` | `v2.0.19-dsh.2` |
 | `2.0.20-dsh.1` | `v2.0.20-dsh.1` |
+| `2.0.20-dsh.4` | `v2.0.20-dsh.4` |
+| `2.0.21-dsh.1` | `v2.0.21-dsh.1` |
 
 两个发布 workflow 都会校验 tag 与 `package.json.version` 是否一致，不一致直接失败。
 
@@ -118,6 +130,16 @@ npm 的 semver 会把 prerelease 排除在范围匹配之外，除非范围自�
 对本 fork 的分发方式来说这是可接受的：使用者是**按包名安装**，而不是把它作为
 caret 范围的依赖引入。若将来确实需要能被范围匹配到，就发一个非 prerelease 的
 版本号，或让使用方依赖 `latest`。
+
+### 在旧运行时上固定版本
+
+`latest` 永远指向最新发布，所以只写包名的 Node 20 宿主会装到
+`2.0.21-dsh.1`，然后被运行时校验拒绝。要待在旧版本上请显式指定版本：
+
+```bash
+# 停在最后一个兼容 Node 20 的版本
+dsh plugin --profile web add @steven-stack-s/dsh-memos-local@2.0.20-dsh.4
+```
 
 ### 为什么需要本地修订号
 

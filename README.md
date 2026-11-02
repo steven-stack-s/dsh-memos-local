@@ -7,6 +7,15 @@
 > commit history preserved.
 > Maintained by steven-stack-s for DeepSeek Harness (DSH).
 
+> **Runtime requirement — Node.js 22 or newer.** Since `v2.0.21-dsh.1`
+> (synced from upstream MemOS 2.0.21) this plugin requires **Node.js >= 22 in
+> the actual host process**, including Electron's embedded Node. It pins
+> `better-sqlite3` to `13.0.3`, which ships Node-API prebuilds instead of
+> rebuilding per Node/Electron ABI. The host runtime is verified before storage
+> is opened, so Node 20 fails fast with
+> `MemOS requires Node.js >=22 in the actual host runtime` rather than
+> corrupting state. Node 20 users should stay on `2.0.20-dsh.4` or upgrade Node.
+
 ## Screenshots
 
 **Memory panel in the DSH shell** — the sidebar's *Memory* entry opens the
@@ -20,6 +29,9 @@ embedded Settings / Import-Export / Help pages:
 ![Memory (MemOS) section in DSH Settings](docs/images/dsh-memory-settings.png)
 
 ## Install
+
+**Prerequisite:** Node.js **>= 22** in the process running DSH (Node 20 is
+rejected at startup since `v2.0.21-dsh.1`). Check with `node -v`.
 
 ### From npmjs (recommended — no credentials needed)
 
@@ -110,6 +122,8 @@ The git tag is `v` plus the version, unchanged:
 | `2.0.19-dsh.1` | `v2.0.19-dsh.1` |
 | `2.0.19-dsh.2` | `v2.0.19-dsh.2` |
 | `2.0.20-dsh.1` | `v2.0.20-dsh.1` |
+| `2.0.20-dsh.4` | `v2.0.20-dsh.4` |
+| `2.0.21-dsh.1` | `v2.0.21-dsh.1` |
 
 Both publish workflows fail if the tag does not match `package.json.version`.
 
@@ -128,6 +142,17 @@ This is acceptable for how this fork is distributed — users install the packag
 by name, not by depending on it through a caret range. If a range-matched
 release ever becomes necessary, either publish a non-prerelease version or have
 consumers depend on `latest`.
+
+### Pinning to a version on an older runtime
+
+`latest` always resolves to the newest publish, so a Node 20 host that installs
+by bare package name will pick up `2.0.21-dsh.1` and fail its runtime check.
+Pin explicitly instead of relying on `latest`:
+
+```bash
+# Stay on the last Node 20-compatible release
+dsh plugin --profile web add @steven-stack-s/dsh-memos-local@2.0.20-dsh.4
+```
 
 ### Why a local revision series exists
 
