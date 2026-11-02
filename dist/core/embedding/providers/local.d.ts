@@ -10,9 +10,17 @@
  * don't normalize again on top of that.
  */
 import type { EmbedRole, EmbeddingProvider, EmbeddingProviderName, ProviderCallCtx } from "../types.js";
-export declare class LocalEmbeddingProvider implements EmbeddingProvider {
+export declare class InProcessLocalEmbeddingProvider implements EmbeddingProvider {
     readonly name: EmbeddingProviderName;
     embed(texts: string[], _role: EmbedRole, ctx: ProviderCallCtx): Promise<number[][]>;
+    close(): Promise<void>;
+}
+/** Windows native DLLs must remain outside the host process. */
+export declare class LocalEmbeddingProvider implements EmbeddingProvider {
+    readonly name: EmbeddingProviderName;
+    private inProcess;
+    private isolated?;
+    embed(texts: string[], role: EmbedRole, ctx: ProviderCallCtx): Promise<number[][]>;
     close(): Promise<void>;
 }
 export declare function __resetLocalExtractorForTests(): void;

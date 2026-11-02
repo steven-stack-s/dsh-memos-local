@@ -31,6 +31,7 @@ export const DEFAULT_CONFIG = {
         provider: "local",
         endpoint: "",
         model: "Xenova/all-MiniLM-L6-v2",
+        local: { remoteHost: "", modelPath: "", cacheDir: "", offline: false, loadTimeoutMs: 120_000 },
         apiKey: "",
         providerIgnore: [],
         providerOrder: [],
@@ -54,7 +55,7 @@ export const DEFAULT_CONFIG = {
         providerIgnore: [],
         providerOrder: [],
         openRouter: false,
-        // 8192, raised from 2048 (which was itself raised from 1024).
+        // DSH-fork: 8192, raised from 2048 (which was itself raised from 1024).
         //
         // This slot carries the structured-JSON calls (reflection synthesis,
         // alpha scoring) AND L3 world-model abstraction. The L3 step is by far

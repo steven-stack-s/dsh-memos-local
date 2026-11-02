@@ -1,6 +1,6 @@
 {
   "name": "@steven-stack-s/dsh-memos-local",
-  "version": "2.0.20-dsh.4",
+  "version": "2.0.21-dsh.1",
   "description": "Reflect2Evolve memory plugin: layered L1/L2/L3 memory, reflection-weighted value backprop, cross-task policy induction, skill crystallization, and three-tier retrieval for OpenClaw, Hermes Agent, and DeepSeek Harness.",
   "repository": {
     "type": "git",
@@ -78,13 +78,13 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "@huggingface/transformers": "4.2.0",
     "@preact/signals": "^2.9.0",
     "@sinclair/typebox": "^0.34.48",
-    "better-sqlite3": "12.11.1",
+    "better-sqlite3": "13.0.3",
     "preact": "^10.29.1",
     "tsx": "^4.21.0",
     "uuid": "^10.0.0",
@@ -129,11 +129,14 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-agent": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-brand": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-llm": "0.1.0-rc.6",
     "@deepseek-ai/dsh-session": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-session-format-v3-to-v4": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.6",
     "@deepseek-ai/dsh-timeout": "0.1.0-rc.6",
     "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@preact/preset-vite": "^2.10.5",
     "@types/better-sqlite3": "^7.6.12",
@@ -151,5 +154,14 @@
     "./client": "./client/client.js",
     "./package.json": "./package.json",
     "./*": "./*"
+  },
+  "allowScripts": {
+    "better-sqlite3": false,
+    "esbuild@0.27.7": true,
+    "esbuild@0.21.5": true,
+    "sharp@0.34.5": true,
+    "onnxruntime-node": false,
+    "protobufjs": false,
+    "fsevents": false
   }
 }

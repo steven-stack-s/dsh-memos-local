@@ -22,6 +22,7 @@
  *     loads providers + config, and constructs the pipeline from a
  *     minimal `{ agent, home?, config? }` input. Used by adapters.
  */
+import { importMemoryBundle } from "./bundle-import.js";
 import { randomUUID } from "node:crypto";
 import { MemosError } from "../../agent-contract/errors.js";
 import { loadConfig, resolveHome, SECRET_FIELD_PATHS } from "../config/index.js";
@@ -44,7 +45,6 @@ import { createRequestDeadline } from "../util/request-deadline.js";
 // ─── Public bootstrap helpers ───────────────────────────────────────────────
 const FINAL_HUB_LLM_FILTER_TIMEOUT_MS = 3_000;
 const DEADLINE_FILTER_SAFE_CUTOFF_MS = 2_000;
-const IMPORT_WRITE_BATCH_SIZE = 500;
 function initialEmbeddingDimensions(provider) {
     return provider === "local" ? 384 : 0;
 }
@@ -64,6 +64,10 @@ export async function bootstrapMemoryCore(options) {
     return result.core;
 }
 export async function bootstrapMemoryCoreFull(options) {
+    const nodeMajor = Number(process.versions.node.split(".")[0]);
+    if (!Number.isInteger(nodeMajor) || nodeMajor < 22) {
+        throw new MemosError("config_invalid", `MemOS requires Node.js >=22 in the actual host runtime (received ${process.versions.node}). Upgrade the host before installing this version.`);
+    }
     const home = options.home ?? resolveHome(options.agent);
     const configResult = options.config
         ? { config: options.config, fromDisk: true, warnings: [], source: home.configFile }
@@ -3108,6 +3112,30 @@ export function createMemoryCore(handle, home, pkgVersion, options = {}) {
             total,
         };
     }
+    // ─── DSH-fork: api_logs aggregation ──
+    /**
+     * SQL-side per-tool rollup over a time window.
+     *
+     * `listApiLogs` is a *paged* API and clamps to 500 rows, so aggregating
+     * through it truncated every window beyond ~1h — the Analytics tool panel
+     * reported 12 `memory_add` calls for a 24h window whose real count was 61.
+     * Delegating to the repo lets COUNT/SUM/AVG run in SQLite across the whole
+     * window regardless of table size.
+     *
+     * Not namespace-scoped, matching `listApiLogs`: the write path does not
+     * stamp owner columns on `api_logs` today, so every row is effectively
+     * cross-namespace. The parameter surface stays explicit so a
+     * per-namespace write can be added without changing callers.
+     */
+    async function aggregateApiLogsByTool(input) {
+        ensureLive();
+        return handle.repos.apiLogs.aggregateByTool({
+            since: input?.since,
+            until: input?.until,
+            toolNames: input?.toolNames,
+            maxDurationsPerTool: input?.maxDurationsPerTool,
+        });
+    }
     async function countTraces(input) {
         ensureLive();
         const needle = (input?.q ?? "").trim().toLowerCase();
@@ -3283,30 +3311,6 @@ export function createMemoryCore(handle, home, pkgVersion, options = {}) {
             out.set(episodeId, order);
         }
         return out;
-    }
-    // ─── api_logs aggregation ──
-    /**
-     * SQL-side per-tool rollup over a time window.
-     *
-     * `listApiLogs` is a *paged* API and clamps to 500 rows, so aggregating
-     * through it truncated every window beyond ~1h — the Analytics tool panel
-     * reported 12 `memory_add` calls for a 24h window whose real count was 61.
-     * Delegating to the repo lets COUNT/SUM/AVG run in SQLite across the whole
-     * window regardless of table size.
-     *
-     * Not namespace-scoped, matching `listApiLogs`: the write path does not
-     * stamp owner columns on `api_logs` today, so every row is effectively
-     * cross-namespace. The parameter surface stays explicit so a
-     * per-namespace write can be added without changing callers.
-     */
-    async function aggregateApiLogsByTool(input) {
-        ensureLive();
-        return handle.repos.apiLogs.aggregateByTool({
-            since: input?.since,
-            until: input?.until,
-            toolNames: input?.toolNames,
-            maxDurationsPerTool: input?.maxDurationsPerTool,
-        });
     }
     // ─── Skills ──
     async function listSkills(input) {
@@ -3549,277 +3553,9 @@ export function createMemoryCore(handle, home, pkgVersion, options = {}) {
             skills,
         };
     }
-    async function importBundle(bundle) {
+    async function importBundle(bundle, options = {}) {
         ensureLive();
-        if (bundle.version && bundle.version !== 1) {
-            throw new MemosError("unsupported", `unsupported bundle version: ${bundle.version}`);
-        }
-        let imported = 0;
-        let skipped = 0;
-        // Best-effort: only insert rows that don't collide with existing
-        // ids. We don't re-mint fresh ids on collision to keep the shape
-        // deterministic for the user — they opt in via a de-duplicating
-        // pre-pass if they want merging.
-        const traces = Array.isArray(bundle.traces) ? bundle.traces : [];
-        const defaultOwner = ownerFromNamespace(activeNamespace);
-        const seenSessions = new Set();
-        const seenEpisodes = new Set();
-        for (const batch of chunkArray(traces, IMPORT_WRITE_BATCH_SIZE)) {
-            const result = handle.db.tx(() => {
-                let batchImported = 0;
-                let batchSkipped = 0;
-                const valid = batch
-                    .map((raw) => raw)
-                    .filter((dto) => dto?.id && dto.episodeId && dto.sessionId);
-                batchSkipped += batch.length - valid.length;
-                // Phase 0 — ensure every referenced (sessionId, episodeId) row
-                // exists before `traces.insert`, otherwise the FK constraint would
-                // bounce imported legacy/external rows.
-                for (const dto of valid) {
-                    const owner = importOwnerFields(dto, defaultOwner);
-                    const ts = Number.isFinite(dto.ts) ? dto.ts : Date.now();
-                    if (!seenSessions.has(dto.sessionId)) {
-                        try {
-                            if (!handle.repos.sessions.getById(dto.sessionId)) {
-                                handle.repos.sessions.upsert({
-                                    id: dto.sessionId,
-                                    agent: dto.ownerAgentKind ?? handle.agent,
-                                    ...owner,
-                                    startedAt: ts,
-                                    lastSeenAt: ts,
-                                    meta: { source: "import" },
-                                });
-                            }
-                        }
-                        catch {
-                            // If the synthetic session row is rejected, the FK insert
-                            // below will fail and be counted as `skipped`.
-                        }
-                        seenSessions.add(dto.sessionId);
-                    }
-                    if (!seenEpisodes.has(dto.episodeId)) {
-                        try {
-                            if (!handle.repos.episodes.getById(dto.episodeId)) {
-                                handle.repos.episodes.upsert({
-                                    id: dto.episodeId,
-                                    sessionId: dto.sessionId,
-                                    ...owner,
-                                    share: dto.share ?? null,
-                                    startedAt: ts,
-                                    endedAt: ts,
-                                    traceIds: [],
-                                    rTask: null,
-                                    status: "closed",
-                                    meta: { source: "import" },
-                                });
-                            }
-                        }
-                        catch {
-                            /* see comment above */
-                        }
-                        seenEpisodes.add(dto.episodeId);
-                    }
-                }
-                const existingIds = new Set(handle.repos.traces
-                    .getManyByIds(valid.map((dto) => dto.id))
-                    .map((row) => row.id));
-                const addedByEpisode = new Map();
-                for (const dto of valid) {
-                    try {
-                        if (existingIds.has(dto.id)) {
-                            batchSkipped++;
-                            continue;
-                        }
-                        const owner = importOwnerFields(dto, defaultOwner);
-                        const ts = Number.isFinite(dto.ts) ? dto.ts : Date.now();
-                        const turnId = Number.isFinite(dto.turnId) ? dto.turnId : ts;
-                        handle.repos.traces.insert({
-                            ...owner,
-                            id: dto.id,
-                            episodeId: dto.episodeId,
-                            sessionId: dto.sessionId,
-                            ts,
-                            userText: dto.userText ?? "",
-                            agentText: dto.agentText ?? "",
-                            summary: dto.summary ?? null,
-                            share: dto.share ?? null,
-                            toolCalls: dto.toolCalls ?? [],
-                            agentThinking: dto.agentThinking ?? null,
-                            reflection: dto.reflection ?? null,
-                            value: dto.value ?? 0,
-                            alpha: dto.alpha ?? 0,
-                            rHuman: dto.rHuman ?? null,
-                            priority: dto.priority ?? 0,
-                            tags: dto.tags ?? [],
-                            vecSummary: null,
-                            vecAction: null,
-                            turnId,
-                            schemaVersion: 1,
-                        });
-                        existingIds.add(dto.id);
-                        if (!addedByEpisode.has(dto.episodeId))
-                            addedByEpisode.set(dto.episodeId, []);
-                        addedByEpisode.get(dto.episodeId).push(dto.id);
-                        batchImported++;
-                    }
-                    catch {
-                        batchSkipped++;
-                    }
-                }
-                for (const [episodeId, ids] of addedByEpisode) {
-                    const episode = handle.repos.episodes.getById(episodeId);
-                    if (!episode)
-                        continue;
-                    handle.repos.episodes.appendTrace(episodeId, dedupeTraceIds([...episode.traceIds, ...ids]));
-                }
-                return { imported: batchImported, skipped: batchSkipped };
-            });
-            imported += result.imported;
-            skipped += result.skipped;
-            await yieldToEventLoop();
-        }
-        // Policies / world models / skills use existing repo.insert shape.
-        for (const batch of chunkArray(bundle.policies ?? [], IMPORT_WRITE_BATCH_SIZE)) {
-            const result = handle.db.tx(() => {
-                let batchImported = 0;
-                let batchSkipped = 0;
-                for (const raw of batch) {
-                    try {
-                        const dto = raw;
-                        if (!dto?.id || handle.repos.policies.getById(dto.id)) {
-                            batchSkipped++;
-                            continue;
-                        }
-                        handle.repos.policies.insert({
-                            ...importOwnerFields(dto, defaultOwner),
-                            id: dto.id,
-                            title: dto.title,
-                            trigger: dto.trigger,
-                            procedure: dto.procedure,
-                            verification: dto.verification,
-                            boundary: dto.boundary,
-                            support: dto.support ?? 0,
-                            gain: dto.gain ?? 0,
-                            status: dto.status,
-                            experienceType: dto.experienceType ?? "success_pattern",
-                            evidencePolarity: dto.evidencePolarity ?? "positive",
-                            salience: dto.salience ?? 0,
-                            confidence: dto.confidence ?? 0.5,
-                            skillEligible: dto.skillEligible !== false,
-                            sourceEpisodeIds: dto.sourceEpisodeIds ?? [],
-                            sourceFeedbackIds: dto.sourceFeedbackIds ?? [],
-                            sourceTraceIds: dto.sourceTraceIds ?? [],
-                            inducedBy: "import",
-                            decisionGuidance: {
-                                preference: [...(dto.preference ?? [])],
-                                antiPattern: [...(dto.antiPattern ?? [])],
-                            },
-                            verifierMeta: dto.verifierMeta ?? null,
-                            share: dto.share ?? null,
-                            vec: null,
-                            createdAt: dto.createdAt ?? Date.now(),
-                            updatedAt: dto.updatedAt ?? Date.now(),
-                        });
-                        batchImported++;
-                    }
-                    catch {
-                        batchSkipped++;
-                    }
-                }
-                return { imported: batchImported, skipped: batchSkipped };
-            });
-            imported += result.imported;
-            skipped += result.skipped;
-            await yieldToEventLoop();
-        }
-        for (const batch of chunkArray(bundle.skills ?? [], IMPORT_WRITE_BATCH_SIZE)) {
-            const result = handle.db.tx(() => {
-                let batchImported = 0;
-                let batchSkipped = 0;
-                for (const raw of batch) {
-                    try {
-                        const dto = raw;
-                        if (!dto?.id || handle.repos.skills.getById(dto.id)) {
-                            batchSkipped++;
-                            continue;
-                        }
-                        handle.repos.skills.insert({
-                            ...importOwnerFields(dto, defaultOwner),
-                            id: dto.id,
-                            name: dto.name,
-                            status: dto.status,
-                            invocationGuide: dto.invocationGuide,
-                            eta: dto.eta ?? 0,
-                            support: dto.support ?? 0,
-                            gain: dto.gain ?? 0,
-                            trialsAttempted: 0,
-                            trialsPassed: 0,
-                            sourcePolicyIds: dto.sourcePolicyIds ?? [],
-                            sourceWorldModelIds: dto.sourceWorldModelIds ?? [],
-                            evidenceAnchors: dto.evidenceAnchors ?? [],
-                            procedureJson: {},
-                            share: dto.share ?? null,
-                            vec: null,
-                            createdAt: dto.createdAt ?? Date.now(),
-                            updatedAt: dto.updatedAt ?? Date.now(),
-                            version: dto.version ?? 1,
-                            usageCount: dto.usageCount ?? 0,
-                            lastUsedAt: dto.lastUsedAt ?? null,
-                        });
-                        batchImported++;
-                    }
-                    catch {
-                        batchSkipped++;
-                    }
-                }
-                return { imported: batchImported, skipped: batchSkipped };
-            });
-            imported += result.imported;
-            skipped += result.skipped;
-            await yieldToEventLoop();
-        }
-        for (const batch of chunkArray(bundle.worldModels ?? [], IMPORT_WRITE_BATCH_SIZE)) {
-            const result = handle.db.tx(() => {
-                let batchImported = 0;
-                let batchSkipped = 0;
-                for (const raw of batch) {
-                    try {
-                        const dto = raw;
-                        if (!dto?.id || handle.repos.worldModel.getById(dto.id)) {
-                            batchSkipped++;
-                            continue;
-                        }
-                        handle.repos.worldModel.insert({
-                            ...importOwnerFields(dto, defaultOwner),
-                            id: dto.id,
-                            title: dto.title,
-                            body: dto.body,
-                            structure: { environment: [], inference: [], constraints: [] },
-                            domainTags: [],
-                            confidence: 0.5,
-                            policyIds: dto.policyIds ?? [],
-                            sourceEpisodeIds: [],
-                            inducedBy: "import",
-                            share: dto.share ?? null,
-                            vec: null,
-                            createdAt: dto.createdAt ?? Date.now(),
-                            updatedAt: dto.updatedAt ?? Date.now(),
-                            version: dto.version ?? 1,
-                            status: dto.status ?? "active",
-                        });
-                        batchImported++;
-                    }
-                    catch {
-                        batchSkipped++;
-                    }
-                }
-                return { imported: batchImported, skipped: batchSkipped };
-            });
-            imported += result.imported;
-            skipped += result.skipped;
-            await yieldToEventLoop();
-        }
-        return { imported, skipped };
+        return importMemoryBundle(bundle, options, { db: handle.db, repos: handle.repos, namespace: activeNamespace });
     }
     async function embeddingMaintenanceStats() {
         ensureLive();
@@ -4664,13 +4400,6 @@ function compareTraceRowsForEpisodeOrder(a, b, lookup) {
     }
     return a.ts - b.ts;
 }
-function importOwnerFields(row, fallback) {
-    return {
-        ownerAgentKind: row.ownerAgentKind ?? fallback.ownerAgentKind,
-        ownerProfileId: row.ownerProfileId ?? fallback.ownerProfileId,
-        ownerWorkspaceId: row.ownerWorkspaceId ?? fallback.ownerWorkspaceId ?? null,
-    };
-}
 function dedupeTraceIds(ids) {
     const seen = new Set();
     const out = [];
@@ -4681,16 +4410,6 @@ function dedupeTraceIds(ids) {
         out.push(id);
     }
     return out;
-}
-function chunkArray(items, size) {
-    const out = [];
-    for (let i = 0; i < items.length; i += size) {
-        out.push(items.slice(i, i + size));
-    }
-    return out;
-}
-function yieldToEventLoop() {
-    return new Promise((resolve) => setTimeout(resolve, 0));
 }
 // ─── Row → DTO mappers ───────────────────────────────────────────────────────
 export function traceRowToDTO(row, episode) {

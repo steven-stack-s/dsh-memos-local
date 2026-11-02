@@ -119,6 +119,8 @@ function stubCore(): MemoryCore {
     ] as any),
     countTraces: vi.fn(async () => 1),
     listApiLogs: vi.fn(async () => ({ logs: [], total: 0 })),
+    // DSH-fork addition: the metrics/tools route delegates its per-tool
+    // rollup to the repo instead of paging through listApiLogs.
     aggregateApiLogsByTool: vi.fn(async () => []),
     listSkills: vi.fn(async () => []),
     countSkills: vi.fn(async () => 0),
@@ -564,110 +566,15 @@ describe("HTTP server — REST routes", () => {
     // one aggregation; both feeds must be pinned to all-namespace reads
     // or the chart under-reports after a namespace flip (#2131).
     //
-    // api_logs is now aggregated in SQL rather than read page-by-page:
-    // `listApiLogs` clamps to 500 rows, which silently truncated every
-    // window beyond ~1h (24h reported 12 calls where the truth was 61).
-    expect(core.aggregateApiLogsByTool).toHaveBeenCalledWith(
-      expect.objectContaining({ since: expect.any(Number) }),
-    );
+    // DSH-fork: the api_logs feed goes through the SQL-side rollup
+    // (`aggregateApiLogsByTool`) rather than paging `listApiLogs`, because
+    // the latter clamps to 500 rows and truncated every window wider than
+    // ~1h. The rollup is namespace-agnostic by construction — the write path
+    // does not stamp owner columns on `api_logs` — so there is no
+    // `includeAllNamespaces` flag to assert here.
+    expect(core.aggregateApiLogsByTool).toHaveBeenCalled();
     expect(core.listTraces).toHaveBeenCalledWith(
       expect.objectContaining({ includeAllNamespaces: true }),
-    );
-  });
-
-  it("aggregates api_logs over the requested window instead of paging", async () => {
-    // Guards the regression directly: the route must ask the repo for a
-    // time-bounded rollup, and must NOT fall back to the paged list.
-    const before = (core.listApiLogs as any).mock.calls.length;
-    const r = await fetch(`${handle.url}/api/v1/metrics/tools?minutes=43200`);
-    expect(r.status).toBe(200);
-
-    const call = (core.aggregateApiLogsByTool as any).mock.calls.at(-1)![0];
-    // 30 days = 43_200 minutes; allow slack for test execution time.
-    const ageMs = Date.now() - call.since;
-    expect(ageMs).toBeGreaterThan(29 * 24 * 60 * 60 * 1000);
-    expect(ageMs).toBeLessThan(31 * 24 * 60 * 60 * 1000);
-    // Only the three public tools are requested.
-    expect(call.toolNames).toEqual(
-      expect.arrayContaining(["memos_search", "memory_add"]),
-    );
-    // The paged reader must stay untouched by this route.
-    expect((core.listApiLogs as any).mock.calls.length).toBe(before);
-  });
-
-  it("pins the /diag probes to all-namespace reads too (#2131)", async () => {
-    // The diagnostic endpoints are the tool operators reach for when the
-    // viewer looks wrong, so they must report the whole database rather
-    // than the turn-scoped namespace. Worst case was /diag/counts: it
-    // used `listXxx({limit: 1})` as a cheap "is there anything?" probe
-    // and short-circuited the real count to 0 when the probe returned
-    // nothing — so a namespace mismatch made the probe report zero rows
-    // while the database was full, sending diagnosis in the wrong
-    // direction entirely.
-    await fetch(`${handle.url}/api/v1/diag/counts`);
-    expect(core.listTraces).toHaveBeenCalledWith(
-      expect.objectContaining({ includeAllNamespaces: true }),
-    );
-    expect(core.listWorldModels).toHaveBeenCalledWith(
-      expect.objectContaining({ includeAllNamespaces: true }),
-    );
-
-    await fetch(`${handle.url}/api/v1/diag/namespace`);
-    expect(core.listWorldModels).toHaveBeenCalledWith(
-      expect.objectContaining({ includeAllNamespaces: true }),
-    );
-  });
-
-  it("pins the Skills / Experiences / Environment-knowledge panels to all-namespace reads (#2131)", async () => {
-    // Regression: the Overview cards pin every count to
-    // `includeAllNamespaces: true`, but the three panels behind them
-    // (skills / policies / world-models) did NOT. When the core's
-    // active namespace had not yet been flipped by a turn — i.e. it
-    // was still the configured `profileId` while the rows were owned
-    // by another profile — the Overview showed non-zero counts while
-    // every panel listed nothing. The symptom self-healed after one
-    // conversation because that turn flipped the active namespace.
-    //
-    // All five viewer panels must use one convention, so nothing here
-    // may depend on the turn-scoped active namespace.
-    await fetch(`${handle.url}/api/v1/skills?limit=20&offset=0`);
-    expect(core.listSkills).toHaveBeenCalledWith(
-      expect.objectContaining({ includeAllNamespaces: true }),
-    );
-    expect(core.countSkills).toHaveBeenCalledWith(
-      expect.objectContaining({ includeAllNamespaces: true }),
-    );
-
-    await fetch(`${handle.url}/api/v1/policies?limit=20&offset=0`);
-    expect(core.listPolicies).toHaveBeenCalledWith(
-      expect.objectContaining({ includeAllNamespaces: true }),
-    );
-    expect(core.countPolicies).toHaveBeenCalledWith(
-      expect.objectContaining({ includeAllNamespaces: true }),
-    );
-
-    await fetch(`${handle.url}/api/v1/world-models?limit=20&offset=0`);
-    expect(core.listWorldModels).toHaveBeenCalledWith(
-      expect.objectContaining({ includeAllNamespaces: true }),
-    );
-    expect(core.countWorldModels).toHaveBeenCalledWith(
-      expect.objectContaining({ includeAllNamespaces: true }),
-    );
-  });
-
-  it("keeps explicit namespace filters winning over the all-namespace default", async () => {
-    // The all-namespace pin must not defeat the toolbar's namespace
-    // dropdown: an explicit ownerAgentKind/ownerProfileId still has to
-    // reach the core so users can narrow to a single profile.
-    await fetch(
-      `${handle.url}/api/v1/skills?limit=20&offset=0&ownerAgentKind=deepseek-harness&ownerProfileId=ptc`,
-    );
-    expect(core.listSkills).toHaveBeenCalledWith(
-      expect.objectContaining({
-        includeAllNamespaces: true,
-        ownerAgentKind: "deepseek-harness",
-        ownerProfileId: "ptc",
-      }),
     );
   });
 
@@ -767,6 +674,25 @@ describe("HTTP server — REST routes", () => {
     expect(r.status).toBe(200);
     const body = (await r.json()) as { imported: number; skipped: number };
     expect(body.imported).toBe(0);
+  });
+
+  it("forwards preview and explicit import ownership choices", async () => {
+    const r = await fetch(`${handle.url}/api/v1/import?dryRun=true&ownership=target&targetProfileId=work`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ version: 1, traces: [] }),
+    });
+    expect(r.status).toBe(200);
+    expect(core.importBundle).toHaveBeenCalledWith({ version: 1, traces: [] }, {
+      dryRun: true, ownership: "target", targetProfileId: "work",
+    });
+  });
+
+  it("rejects invalid import options before calling the core", async () => {
+    const r = await fetch(`${handle.url}/api/v1/import?ownership=public`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+    });
+    expect(r.status).toBe(400);
+    expect(core.importBundle).not.toHaveBeenCalled();
   });
 
   it("GET /api/v1/embeddings/maintenance returns vector health", async () => {

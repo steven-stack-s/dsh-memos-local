@@ -20,15 +20,16 @@
  * The test runs with values from the request body only.
  */
 import { type Embedder } from "../../core/embedding/index.js";
+import type { EmbeddingConfig } from "../../core/embedding/types.js";
 import type { ServerDeps } from "../types.js";
 import { type Routes } from "./registry.js";
 export declare function registerModelsRoutes(routes: Routes, deps: ServerDeps): void;
 type LocalProbeEmbedder = Pick<Embedder, "embedOne">;
-type LocalProbeEmbedderFactory = (model: string) => LocalProbeEmbedder;
+type LocalProbeEmbedderFactory = (model: string, local?: EmbeddingConfig["local"]) => LocalProbeEmbedder;
 /**
  * Load the local model and execute a real embedding. The transformer pipeline
  * is process-global, so intentionally keep it warm after a successful probe.
  */
-export declare function probeLocalEmbedding(model: string, create?: LocalProbeEmbedderFactory): Promise<number>;
+export declare function probeLocalEmbedding(model: string, create?: LocalProbeEmbedderFactory, local?: EmbeddingConfig["local"]): Promise<number>;
 export {};
 //# sourceMappingURL=models.d.ts.map

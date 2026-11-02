@@ -1,6 +1,7 @@
 /** Read-oriented MemOS tools exposed through DeepSeek Harness. */
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { DEEPSEEK_HARNESS_AGENT, extractDeepSeekHarnessLlmRoute, } from "./bridge.js";
+import { deepSeekHarnessNamespace } from "./namespace.js";
 import { isDeepSeekHarnessTimeout, waitForDeepSeekHarnessDeadline, } from "./deadline.js";
 const JSON_OUTPUT = {
     schema: {
@@ -366,17 +367,7 @@ function toolAgent(value) {
         : undefined;
 }
 function namespaceFor(session, profileId) {
-    const preset = session?.header?.["agentPreset"];
-    const resolvedProfileId = typeof preset === "string" && preset.trim()
-        ? preset.trim()
-        : profileId;
-    return {
-        agentKind: DEEPSEEK_HARNESS_AGENT,
-        profileId: resolvedProfileId,
-        profileLabel: resolvedProfileId,
-        workspacePath: session?.header?.cwd,
-        sessionKey: session?.id,
-    };
+    return deepSeekHarnessNamespace(session, profileId);
 }
 function requireText(value, field) {
     if (typeof value !== "string" || !value.trim()) {

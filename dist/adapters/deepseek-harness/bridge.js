@@ -6,6 +6,7 @@
  * keeping them out of this file makes the lifecycle logic independently
  * testable and prevents DSH types from leaking into the algorithm core.
  */
+import { deepSeekHarnessNamespace } from "./namespace.js";
 import { waitForDeepSeekHarnessDeadline } from "./deadline.js";
 export const DEEPSEEK_HARNESS_AGENT = "deepseek-harness";
 export const DEEPSEEK_HARNESS_PLUGIN = "memos-local-memory";
@@ -244,17 +245,7 @@ export class DeepSeekHarnessBridge {
         return turn === undefined ? undefined : this.getTurn(session, turn)?.episodeId;
     }
     namespaceFor(session) {
-        const preset = session.header?.["agentPreset"];
-        const profileId = typeof preset === "string" && preset.trim()
-            ? preset.trim()
-            : this.profileId;
-        return {
-            agentKind: DEEPSEEK_HARNESS_AGENT,
-            profileId,
-            profileLabel: profileId,
-            workspacePath: session.header?.cwd,
-            sessionKey: session.id,
-        };
+        return deepSeekHarnessNamespace(session, this.profileId);
     }
     async flush(sessionId) {
         if (sessionId !== undefined) {

@@ -3,6 +3,63 @@
 Notable changes to `dsh-memos-local`. Maintained by hand; for the full
 per-commit history use `git log` or the GitHub releases page.
 
+## [v2.0.21-dsh.1]
+
+上游基线 `2.0.20` → `2.0.21`（导入 `apps/memos-local-plugin` 子树 55 文件，
+含 5 个上游提交）。DSH 适配、viewer 定制与本地算法定制全部保留。
+
+### Breaking — 运行时要求提升（随上游 04bfa63d）
+
+- **Node.js >= 22**（原 `>=20`）。`bootstrapMemoryCoreFull` 会在打开存储前
+  用实际宿主运行时校验，Node 20 直接以
+  `MemOS requires Node.js >=22 in the actual host runtime` 拒绝启动。
+- **`better-sqlite3` 12.11.1 → 13.0.3**，改用官方 prebuild，不再需要本地
+  编译（`gypfile: false` / `hasInstallScript: false`）。新增
+  `scripts/normalize-sqlite-lock.cjs` 校验两份 lockfile 的元数据一致性。
+- `@deepseek-ai/cordis` 的 dev 依赖放宽到 `~4.0.4`（实测 4.0.5 可用）。
+
+### Added — 随上游 2.0.21
+
+- **bundle 导入/导出**（`core/pipeline/bundle-import.ts` + `agent-contract/import.ts`）：
+  可预览归属后再应用，导入前做校验。
+- **本地嵌入进程隔离**（`core/embedding/providers/local-process*.ts`）：
+  把本地模型推理放进独立进程，避免阻塞事件循环；Windows 下隔离原生 DLL。
+- **本地模型配置可视化**：`local.remoteHost` / `modelPath` / `cacheDir` /
+  `offline` 进入设置项，并可在 UI 里看到模型加载状态。
+- 安装器：`install.sh` / `install.ps1`（原生支持 `--agent dsh --profile <name>`）、
+  `scripts/verify-native-runtime.cjs`、`scripts/verify-script-policy.cjs`、
+  `scripts/migrate-dsh-preset-profile.mjs`。
+- 测试基建 `tests/helpers/deepseek-harness-v4.ts`（真实 V4 格式编解码校验）。
+
+### Fixed — 自定义与上游契约的对齐
+
+- **消息 source 只发 `kind`**：上游 `message-source.ts` 重新加回了 `plugin`
+  字段，但 `dsh-session-format-v3-to-v4` 的转换器明确把
+  `{kind:"plugin", plugin}` 改写为 `{kind:"plugin:<name>"}` 并**删除**
+  `plugin` 键，V4 原生准入更直接拒绝该包装。保留 `plugin` 会把 V4 拒绝的
+  形状带回来，故维持只发 `kind`，并同步三处测试断言。
+- **工具面板走 SQL 聚合**：上游测试断言 `metrics/tools` 调用 `listApiLogs`，
+  但本 fork 的定制改为调用 `aggregateApiLogsByTool`（`listApiLogs` 会被
+  clamp 到 500 行，导致 >1h 窗口少算）。测试改为断言新路径。
+- **本地模型缓存的 DSH 默认值**：`local-config.test.ts` 期望
+  `~/.cache/memos/models`；本 fork 在 `DSH_HOME` 存在时默认落到
+  `$DSH_HOME/memos-plugin/data/.model-cache`。测试改为按环境推导期望值。
+
+### Kept — 本 fork 的本地定制（未被上游覆盖）
+
+- `llm.maxTokens` 仍为 8192（L3 世界模型抽象需要，上游默认 1024）。
+- 嵌入模型默认走 `hf-mirror.com`（`MEMOS_HF_MIRROR` 可覆盖，
+  `MEMOS_HF_MIRROR_DISABLE=1` 可关闭），缓存默认落在 `DSH_HOME`。
+- `aggregateApiLogsByTool` 与工具耗时面板（`core/util/percentile.ts`）。
+- DSH 桌面端 Bearer 会话认证（PR #1 及其评审补丁）。
+
+### Verification
+
+- 全量测试：**172 文件 / 1483 通过 / 2 跳过 / 0 失败**。
+- `tsc -p tsconfig.json --noEmit` 通过。
+- 测试库迁移：14 个迁移全部应用，会话/episode 读写冒烟通过。
+- 上游 `2.0.21` 无新增 DB 迁移（迁移集与 2.0.20 相同）。
+
 ## [v2.0.20-dsh.4]
 
 ### Added — DSH 桌面端的 Bearer 会话认证（PR #1，作者 @1234yqcg）

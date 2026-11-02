@@ -135,10 +135,11 @@ async function resolveSecrets(deps, req) {
 }
 // ─── Embedding probe ─────────────────────────────────────────────────────
 const DEFAULT_LOCAL_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
-function createLocalProbeEmbedder(model) {
+function createLocalProbeEmbedder(model, local) {
     return createEmbedder({
         provider: "local",
         model,
+        local,
         dimensions: 384,
         openRouter: false,
         cache: { enabled: false, maxItems: 0 },
@@ -148,10 +149,11 @@ function createLocalProbeEmbedder(model) {
  * Load the local model and execute a real embedding. The transformer pipeline
  * is process-global, so intentionally keep it warm after a successful probe.
  */
-export async function probeLocalEmbedding(model, create = createLocalProbeEmbedder) {
+export async function probeLocalEmbedding(model, create = createLocalProbeEmbedder, local) {
     const resolvedModel = model.trim() || DEFAULT_LOCAL_EMBEDDING_MODEL;
     try {
-        const vector = await create(resolvedModel).embedOne("ping");
+        const embedder = local === undefined ? create(resolvedModel) : create(resolvedModel, local);
+        const vector = await embedder.embedOne("ping");
         if (vector.length === 0)
             throw new Error("no embedding vector returned");
         return vector.length;
@@ -250,7 +252,7 @@ async function probeEmbedding(req) {
             return first.length;
         }
         case "local":
-            return probeLocalEmbedding(model);
+            return probeLocalEmbedding(model, undefined, req.local);
         default:
             throw new Error(`unsupported embedding provider: ${provider}`);
     }

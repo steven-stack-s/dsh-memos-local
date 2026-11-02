@@ -33,6 +33,7 @@ import type {
 } from "./dto.js";
 import type { CoreEvent } from "./events.js";
 import type { LogRecord } from "./log-record.js";
+import type { MemoryImportBundle, MemoryImportOptions, MemoryImportResult } from "./import.js";
 
 // ─── Public lifecycle / status ────────────────────────────────────────────────
 
@@ -473,19 +474,18 @@ export interface MemoryCore {
   }): Promise<{ logs: ApiLogDTO[]; total: number }>;
 
   /**
-   * Per-tool rollup of `api_logs` over a time window, computed in SQL.
+   * DSH-fork: SQL-side per-tool rollup of `api_logs` over a time window.
    *
-   * Exists because {@link listApiLogs} pages rows (and caps at 500), so
-   * aggregating through it silently truncated the Analytics tool panel to
-   * roughly the last hour regardless of the selected window — a 98%
-   * under-count on a 12k-row table. Counts, errors and the average here
-   * cover every row in the window; the returned `durationsMs` is a capped
-   * sample used only for percentiles.
+   * Exists because {@link listApiLogs} is paged and clamps to 500 rows, so
+   * aggregating through it truncated every window wider than ~1h. Counts,
+   * error counts and averages are computed in SQLite over the whole window;
+   * `durationsMs` is a capped sample used only for percentiles.
    */
   aggregateApiLogsByTool(input?: {
     since?: number;
     until?: number;
     toolNames?: readonly string[];
+    /** Cap on the per-tool duration sample; counts/averages ignore it. */
     maxDurationsPerTool?: number;
   }): Promise<
     Array<{
@@ -614,13 +614,7 @@ export interface MemoryCore {
     worldModels: WorldModelDTO[];
     skills: SkillDTO[];
   }>;
-  importBundle(bundle: {
-    version?: number;
-    traces?: unknown[];
-    policies?: unknown[];
-    worldModels?: unknown[];
-    skills?: unknown[];
-  }): Promise<{ imported: number; skipped: number }>;
+  importBundle(bundle: MemoryImportBundle, options?: MemoryImportOptions): Promise<MemoryImportResult>;
 
   // ── embedding maintenance ──
   embeddingMaintenanceStats(): Promise<EmbeddingMaintenanceStats>;

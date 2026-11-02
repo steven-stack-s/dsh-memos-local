@@ -34,6 +34,13 @@ export declare const ConfigSchema: import("@sinclair/typebox").TObject<{
         provider: import("@sinclair/typebox").TUnion<[import("@sinclair/typebox").TLiteral<"local">, import("@sinclair/typebox").TLiteral<"openai_compatible">, import("@sinclair/typebox").TLiteral<"gemini">]>;
         endpoint: import("@sinclair/typebox").TString;
         model: import("@sinclair/typebox").TString;
+        local: import("@sinclair/typebox").TOptional<import("@sinclair/typebox").TObject<{
+            remoteHost: import("@sinclair/typebox").TString;
+            modelPath: import("@sinclair/typebox").TString;
+            cacheDir: import("@sinclair/typebox").TString;
+            offline: import("@sinclair/typebox").TBoolean;
+            loadTimeoutMs: import("@sinclair/typebox").TNumber;
+        }>>;
         apiKey: import("@sinclair/typebox").TString;
         /** OpenRouter provider routing — providers to skip. */
         providerIgnore: import("@sinclair/typebox").TOptional<import("@sinclair/typebox").TArray<import("@sinclair/typebox").TString>>;

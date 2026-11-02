@@ -1,3 +1,4 @@
+import { assertV4RowAdmission, releasedV4SessionFormatCodec } from "@deepseek-ai/dsh-session-format-v3-to-v4";
 import { Context } from "@deepseek-ai/cordis";
 import LlmRuntime, {
   LlmAdapter,
@@ -12,6 +13,7 @@ import LlmRuntime, {
 } from "@deepseek-ai/dsh-llm";
 import { describe, expect, it, vi } from "vitest";
 
+import { dshV4Event } from "../../helpers/deepseek-harness-v4.js";
 import {
   createDeepSeekHarnessHostLlmBridge,
   DeepSeekHarnessLlmRouteContext,
@@ -165,6 +167,13 @@ describe("DeepSeek Harness host LLM bridge", () => {
       timeoutMs: 2_000,
     }));
 
+    // Exercise the actual host bridge output; auxiliary messages need no form.
+    const message = request!.messages[0]!;
+    expect(message.source).not.toHaveProperty("form");
+    const event = dshV4Event("user/message", message);
+    expect(() => assertV4RowAdmission(event)).not.toThrow();
+    expect(() => releasedV4SessionFormatCodec.encodeEvent(event)).not.toThrow();
+
     expect(request).toMatchObject({
       provider: "deepseek",
       model: "deepseek-chat",
@@ -176,10 +185,8 @@ describe("DeepSeek Harness host LLM bridge", () => {
         {
           role: "user",
           content: [{ type: "text", text: "Question" }],
-          // DSH 0.1.7 (Session V4) removed the shared catch-all `plugin` kind:
-          // `MessageSourceMap` is merge-extensible and each producer declares
-          // its own kind, so the plugin name now rides inside `kind` itself and
-          // the separate `plugin` field is gone.
+          // DSH-fork: producer-owned kind only — V4 rejects the retired
+          // plugin wrapper, so memos never emits the sibling `plugin` field.
           source: { kind: "plugin:memos-local-memory" },
         },
         {
@@ -190,11 +197,6 @@ describe("DeepSeek Harness host LLM bridge", () => {
       ],
     });
     expect(request).not.toHaveProperty("sessionId");
-    // Guard the exact source shape, not just the kind: `toMatchObject` ignores
-    // extra keys, so a regression that re-added the retired `plugin` field
-    // would otherwise pass unnoticed.
-    const hostUserMessage = request?.messages[0] as { source?: Record<string, unknown> };
-    expect(hostUserMessage?.source).toEqual({ kind: "plugin:memos-local-memory" });
     expect(request?.signal).toBeInstanceOf(AbortSignal);
     expect(prepared?.config).toEqual({
       provider: "deepseek",
